@@ -1,9 +1,9 @@
 # rocket
 
-A single-user Command Line Interface (CLI) tool for setting long-term career ambitions, committing quarterly objectives, and executing implementation outcomes with upward traceability.
+A single-user Command Line Interface (CLI) tool for setting long-term career ambitions, committing quarterly objectives, and executing outcomes with upward traceability.
 
 - **[CONTEXT.md](CONTEXT.md)**: The domain language and three-tier hierarchy rules. Read before naming anything.
-- **[DESIGN.md](DESIGN.md)**: Architecture specification, CLI command surface (Planning vs. Implementation modes), SQLite schema, and implementation plan.
+- **[DESIGN.md](DESIGN.md)**: Architecture specification, CLI command surface (Planning vs. Throughput modes), SQLite schema, and implementation plan.
 
 ## Toolchain
 
