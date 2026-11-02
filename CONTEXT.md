@@ -8,6 +8,14 @@ This file is a glossary: it says what each term **is**, never what the tool **do
 
 The tiers nest and Ideas do not. **Career Goals**, **Quarterly Objectives** and **Outcomes** form a commitment hierarchy ordered by scope, each tier committed inside the one above it — except the Outcomes that sit outside it: an **Emergency Outcome** is committed to a Quarter with no Objective above it, and so is a **Parentless Outcome**, promoted from an Idea before anyone chose one. **Ideas** sit outside that hierarchy entirely: capturing one commits nothing, so an Idea has no tier, no Quarter, and nothing to trace upward to. It acquires a place in the hierarchy only by being Promoted — and even then the Idea itself is kept, recording what it became, rather than being consumed.
 
+**Commitment**:
+Any of the three tiers considered as something committed to: a Career Goal, a Quarterly Objective or an Outcome. A Commitment may sit outside the nesting — an Emergency Outcome and a Parentless Outcome are Commitments like any other — while an Idea is never one, because capturing an Idea commits nothing.
+_Avoid_: Item, entry, entity, task, work item
+
+**Claim**:
+What a Commitment's title states: a single change in the world that holds once the work is done. An Outcome's Status is the record of whether its Claim came true; nothing above the bottom tier records it.
+_Avoid_: Predicate, statement, goal statement, success statement
+
 ### The three tiers
 
 **Career Goal**:
@@ -37,8 +45,8 @@ The reason a Career Goal, a Quarterly Objective or an Outcome is worth doing, in
 _Avoid_: Rationale, reason, justification, motivation
 
 **Verification**:
-A change in the world that would show a Career Goal, a Quarterly Objective or an Outcome was reached — stated so that someone else could check it without asking, and measurable where the thing admits measurement. An entity may have several, and may have none. A Verification is a statement about the world, not a task: nothing records whether it holds.
-_Avoid_: Acceptance criteria, definition of done, success metric, test
+The observation that would settle a Commitment's Claim where its components do not settle it on their own — stated so that someone else could check it without asking, and measurable where the thing admits measurement. A Commitment with nothing below it may instead state the observation that shows its Claim at all. An entity may have several, and may have none. A Verification is a statement about the world, not a task: nothing records whether it holds.
+_Avoid_: Acceptance criteria, definition of done, success metric, test, checklist
 
 Verification is not Status: an Outcome can be `achieved` with no Verification at all, and can have its Verification met while staying `open`. Neither field implies the other.
 
@@ -110,6 +118,15 @@ The part of an Outcome's effort recorded in an earlier Quarter than the one it n
 _Avoid_: Rolled over, backlog debt, legacy effort
 
 ## Notes on naming
+
+**A title states its Claim, once.** A Commitment's title is written as something that becomes true when the work is done, not as a name for the work. If a title needs "and", it is either two Commitments or one Commitment plus a Verification. Composition is not Verification — an Objective's Outcomes are what it is made of, and they never appear as its Verification.
+
+- **Career Goal**: *"I set my own priorities at work"* — not *"get better at prioritisation"*.
+- **Quarterly Objective**: *"releases need no human in the loop"* — not *"improve the release process"*.
+- **Outcome**: *"the migration runs on the new scheduler"* — not *"ship the migration"*.
+- Two changes: *"improve releases and reduce toil"* is two Commitments, or one Commitment and one Verification.
+
+Only a Commitment has a title; an Idea has text, and its text becomes a title only once it is Promoted.
 
 **Objective** alone means a Quarterly Objective, and **Outcome** alone is the bottom tier — it has no longer form. A qualifier on the upper two tiers says which scope is meant, so don't let Goal, Objective and Outcome collapse into each other. Achievement is never a Stage: a **Status** is what can be achieved, and a Stage is only ever `todo` or `doing`.
 

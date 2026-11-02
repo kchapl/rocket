@@ -77,10 +77,12 @@ The two modes group commands by intent; they are not state the tool holds. No mo
 | `rocket quarter review [quarter]` | Report the Quarter's Gaps: Unaligned Goals, Empty Objectives, Parentless Outcomes |
 | `rocket objective add <title> --goal <id> [--why <text>] [--verification <text>]...` | Commit a new Quarterly Objective to the current Quarter |
 | `rocket objective drop <id>` | Drop an Objective by dropping every `open` Outcome under it, in one transaction |
+| `rocket objective rename <id> <title>` | Rename a Quarterly Objective |
 | `rocket outcome add --objective <id> <title> [--why <text>] [--verification <text>]...` | Plan a new Outcome under an Objective |
 | `rocket outcome add <title> [--why <text>] [--verification <text>]...` | Plan an unfiled Outcome — parentless and unflagged |
 | `rocket outcome add --emergency <title>` | Add an unparented emergency Outcome |
 | `rocket outcome parent <outcome-id> <objective-id>` | Set the Outcome's Objective, whether it had none or a different one; clears the emergency flag, and keeps no record of the previous parent |
+| `rocket outcome rename <id> <title>` | Rename an Outcome |
 | `rocket inbox list [--all]` | List `pending` Ideas; `--all` also shows promoted and discarded ones |
 | `rocket inbox add <text>` | Capture an idea quickly |
 | `rocket inbox promote <id> [--to-goal \| --to-obj <goal-id> \| --to-out]` | Convert an Idea into a goal, objective or outcome; `--to-out` yields a parentless, unflagged Outcome, and the Idea is kept and records what it became |
