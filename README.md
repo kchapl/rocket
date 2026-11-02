@@ -48,14 +48,22 @@ ROCKET_DB=/tmp/scratch.db scala-cli run . -- career list
 
 ## What works today
 
-Only the `career` group of Planning Mode:
+The Planning half of the hierarchy, and a read-only view of the Backlog:
 
 | Command | Purpose |
 |---|---|
 | `rocket career add <title> [--why <text>] [--verification <text>]...` | Create a Career Goal |
 | `rocket career list [--archived]` | List active Goals, or archived ones |
 | `rocket career archive <id>` / `unarchive <id>` | Archive a Goal, or return it to pursuit |
+| `rocket quarter [current \| list]` | Show the current Quarter, or list the Quarters in the record |
+| `rocket objective add <title> --goal <id> [--why <text>] [--verification <text>]...` | Commit a Quarterly Objective to the current Quarter |
+| `rocket outcome add --objective <id> <title> [--why <text>] [--verification <text>]...` | Plan an Outcome under an Objective |
+| `rocket outcome add <title> [--why <text>] [--verification <text>]...` | Plan an unfiled Outcome — parentless and unflagged |
+| `rocket outcome add --emergency <title>` | Add an unparented emergency Outcome |
+| `rocket backlog [list] [--all]` | The Quarter's ranked queue of `open` Outcomes; `--all` adds achieved and dropped |
 
-Ids accept an exact id or a unique case-insensitive prefix of the id or title. Exit codes: `0` success, `1` domain error (unknown or ambiguous Goal), `2` usage error.
+Repeatable `--verification` flags keep the order given. Ids accept an exact id or a unique case-insensitive prefix of the id or title. Exit codes: `0` success, `1` domain error (unknown or ambiguous id, archived Goal, cross-Quarter parent), `2` usage error.
+
+Not yet implemented: Quarter rollover, `quarter review`, `objective drop`, `outcome parent`, `progress`, `inbox`, `trace`, `export` and `import`.
 
 Tests: `scala-cli test .`
