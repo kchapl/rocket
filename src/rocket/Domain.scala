@@ -59,10 +59,20 @@ final case class Outcome(
 /** Quarters are values, never rows: `YYYY-Qn`, derived from a calendar date. */
 object Quarter {
 
+  private val Name = "^(\\d{4})-Q([1-4])$".r
+
   def of(date: LocalDate): String = {
     val quarter = (date.getMonthValue - 1) / 3 + 1
     s"${date.getYear}-Q$quarter"
   }
 
   def current: String = of(LocalDate.now())
+
+  /** A Quarter as a count of Quarters since year 0: orders them and lets them be counted apart. */
+  def index(name: String): Option[Int] = name match {
+    case Name(year, quarter) => year.toIntOption.map(year => year * 4 + quarter.toInt - 1)
+    case _                   => None
+  }
+
+  def at(index: Int): String = s"${index / 4}-Q${index % 4 + 1}"
 }

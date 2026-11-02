@@ -66,8 +66,14 @@ Both modes: the hierarchy is shaped in Planning Mode and worked in Throughput Mo
 | `rocket progress box <id>` | Record a completed Time Box against the current Quarter, and start the work |
 | `rocket progress achieve <id>` / `drop <id>` | Close an Outcome; a closed Outcome takes no further Time Box |
 
+Every command first carries the record into the current Quarter if a calendar boundary has passed: open Outcomes move forward with their Time Boxes left in the Quarter they were recorded in, each parent Objective with live work is re-committed into the new Quarter, and one notice line reports it. Nothing is carried into the Quarters that were skipped.
+
+```text
+Notice: 2026-Q1–Q3 closed. Carried forward 4 open outcomes into 2026-Q4.
+```
+
 Repeatable `--verification` flags keep the order given. Ids accept an exact id or a unique case-insensitive prefix of the id or title. Exit codes: `0` success, `1` domain error (unknown or ambiguous id, archived Goal, cross-Quarter parent, already-closed Outcome), `2` usage error.
 
-Not yet implemented: Quarter rollover, `quarter review`, `objective drop`, `outcome parent`, `inbox`, `trace`, `export` and `import`.
+Not yet implemented: `quarter review`, `objective drop`, `outcome parent`, `inbox`, `trace`, `export` and `import`.
 
 Tests: `scala-cli test .`

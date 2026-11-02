@@ -266,6 +266,96 @@ final class Store(connection: Connection) {
       _ => ()
     )(_.getString("quarter"))
 
+  // --- Quarter rollover ---------------------------------------------------
+
+  /**
+   * Carries the record into `current` when a boundary has passed, once however
+   * many were crossed, and returns the notice to print when it moved.
+   */
+  def rollover(current: String): Option[String] =
+    (setting("carried_through").flatMap(Quarter.index), Quarter.index(current)) match {
+      case (Some(carriedThrough), Some(now)) if carriedThrough < now =>
+        val carried = inTransaction {
+          val count = carryForward(current)
+          setSetting("carried_through", current)
+          count
+        }
+        Some(notice(carriedThrough, now, current, carried))
+      case _ => None
+    }
+
+  /**
+   * Moves every open Outcome into `quarter`, re-committing the Objective of each
+   * group that still has live work, and returns how many Outcomes moved. Time
+   * Boxes stay in the Quarter they were recorded in, which is what makes
+   * Carried In derivable. Achieved and dropped Outcomes stay behind.
+   */
+  private def carryForward(quarter: String): Int = {
+    val carried = query(
+      "SELECT id, objective_id FROM outcome WHERE status = 'open' ORDER BY quarter, rank",
+      _ => ()
+    )(rs => (rs.getString("id"), Option(rs.getString("objective_id"))))
+    val alreadyHere =
+      query("SELECT id FROM outcome WHERE quarter = ? ORDER BY rank", _.setString(1, quarter))(
+        _.getString("id")
+      )
+
+    val reissued =
+      carried.flatMap(_._2).distinct.map(old => old -> recommit(old, quarter)).toMap
+
+    var spare = nextRank(quarter)
+    carried.foreach { case (id, parent) =>
+      val ps = connection.prepareStatement(
+        "UPDATE outcome SET quarter = ?, objective_id = ?, rank = ? WHERE id = ?"
+      )
+      try {
+        ps.setString(1, quarter)
+        setOptional(ps, 2, parent.map(old => reissued.getOrElse(old, old)))
+        ps.setInt(3, spare)
+        ps.setString(4, id)
+        ps.executeUpdate()
+      } finally ps.close()
+      spare += 1
+    }
+
+    renumber(quarter, carried.map(_._1) ++ alreadyHere)
+    carried.size
+  }
+
+  /** Copies an Objective into `quarter` for the work carried into it, Verifications included. */
+  private def recommit(oldObjectiveId: String, quarter: String): String = {
+    val id = nextId("obj", "objective")
+    val insert = connection.prepareStatement(
+      """INSERT INTO objective(id, title, goal_id, quarter, why)
+        |SELECT ?, title, goal_id, ?, why FROM objective WHERE id = ?""".stripMargin
+    )
+    try {
+      insert.setString(1, id)
+      insert.setString(2, quarter)
+      insert.setString(3, oldObjectiveId)
+      insert.executeUpdate()
+    } finally insert.close()
+
+    val copy = connection.prepareStatement(
+      """INSERT INTO objective_verification(objective_id, ordinal, statement)
+        |SELECT ?, ordinal, statement FROM objective_verification WHERE objective_id = ?""".stripMargin
+    )
+    try {
+      copy.setString(1, id)
+      copy.setString(2, oldObjectiveId)
+      copy.executeUpdate()
+    } finally copy.close()
+    id
+  }
+
+  private def notice(start: Int, end: Int, current: String, carried: Int): String = {
+    val closed =
+      if (end - start == 1) Quarter.at(start)
+      else s"${Quarter.at(start)}–${Quarter.at(end - 1)}"
+    val noun = if (carried == 1) "open outcome" else "open outcomes"
+    s"Notice: $closed closed. Carried forward $carried $noun into $current."
+  }
+
   // --- Shared helpers -----------------------------------------------------
 
   private def resolve(needle: String, table: String, label: String): Either[String, String] = {
@@ -417,17 +507,10 @@ final class Store(connection: Connection) {
 
   /**
    * Rewrites the Quarter's ranks 1..n, keeping terminal Outcomes in the slots
-   * they occupied, and returns the resulting order. Ranks shift through spare
-   * negative values first: SQLite cannot defer `UNIQUE(quarter, rank)`.
+   * they occupied, and returns the resulting order.
    */
   private def writeRanks(queue: List[(String, Boolean)], openIds: List[String]): List[String] =
     inTransaction {
-      val negate = connection.prepareStatement("UPDATE outcome SET rank = -rank WHERE quarter = ?")
-      try {
-        negate.setString(1, Quarter.current)
-        negate.executeUpdate()
-      } finally negate.close()
-
       var remaining = openIds
       val ordered = queue.map { case (rowId, isOpen) =>
         if (isOpen) {
@@ -436,17 +519,43 @@ final class Store(connection: Connection) {
           next
         } else rowId
       }
-
-      val assign = connection.prepareStatement("UPDATE outcome SET rank = ? WHERE id = ?")
-      try {
-        ordered.zipWithIndex.foreach { case (rowId, index) =>
-          assign.setInt(1, index + 1)
-          assign.setString(2, rowId)
-          assign.executeUpdate()
-        }
-      } finally assign.close()
+      renumber(Quarter.current, ordered)
       ordered
     }
+
+  /**
+   * Gives `ordered` the ranks 1..n in `quarter`. Ranks shift through spare
+   * negative values first: SQLite cannot defer `UNIQUE(quarter, rank)`.
+   */
+  private def renumber(quarter: String, ordered: List[String]): Unit = {
+    val negate = connection.prepareStatement("UPDATE outcome SET rank = -rank WHERE quarter = ?")
+    try {
+      negate.setString(1, quarter)
+      negate.executeUpdate()
+    } finally negate.close()
+
+    val assign = connection.prepareStatement("UPDATE outcome SET rank = ? WHERE id = ?")
+    try {
+      ordered.zipWithIndex.foreach { case (rowId, index) =>
+        assign.setInt(1, index + 1)
+        assign.setString(2, rowId)
+        assign.executeUpdate()
+      }
+    } finally assign.close()
+  }
+
+  private def setting(key: String): Option[String] =
+    query("SELECT value FROM setting WHERE key = ?", _.setString(1, key))(_.getString("value"))
+      .headOption
+
+  private def setSetting(key: String, value: String): Unit = {
+    val ps = connection.prepareStatement("INSERT OR REPLACE INTO setting(key, value) VALUES (?, ?)")
+    try {
+      ps.setString(1, key)
+      ps.setString(2, value)
+      ps.executeUpdate()
+    } finally ps.close()
+  }
 
   private def query[A](sql: String, bind: PreparedStatement => Unit)(
       read: ResultSet => A

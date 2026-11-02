@@ -10,6 +10,21 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
   def run(args: List[String]): Int = args match {
     case Nil                    => usage(out); 0
     case ("--help" | "-h") :: _ => usage(out); 0
+    case _ :: _ =>
+      rollover()
+      dispatch(args)
+  }
+
+  /**
+   * Runs before any command, in either mode: the record moves Quarter at a
+   * boundary, never part-way through a piece of work.
+   */
+  private def rollover(): Unit =
+    withStore { store =>
+      store.rollover(Quarter.current).foreach(out.println)
+    }
+
+  private def dispatch(args: List[String]): Int = args match {
     case "career" :: rest       => career(rest)
     case "quarter" :: rest      => quarter(rest)
     case "objective" :: rest    => objective(rest)
@@ -20,6 +35,9 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       err.println(s"unknown command: $other")
       usage(err)
       2
+    case Nil =>
+      usage(out)
+      0
   }
 
   // --- Planning Mode: Career Goals ----------------------------------------
