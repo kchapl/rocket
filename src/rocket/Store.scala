@@ -116,6 +116,26 @@ final class Store(connection: Connection) {
   def resolveObjective(needle: String): Either[String, String] =
     resolve(needle, "objective", "Quarterly Objective")
 
+  /**
+   * Drops an Objective by dropping every open Outcome under it in one
+   * transaction. The Objective row stays: it has no Status, so there is nothing
+   * to record but the Outcomes it held.
+   */
+  def dropObjective(needle: String): Either[String, String] =
+    resolveObjective(needle).map { id =>
+      val dropped = inTransaction {
+        val ps = connection.prepareStatement(
+          "UPDATE outcome SET status = 'dropped' WHERE objective_id = ? AND status = 'open'"
+        )
+        try {
+          ps.setString(1, id)
+          ps.executeUpdate()
+        } finally ps.close()
+      }
+      val noun = if (dropped == 1) "outcome" else "outcomes"
+      s"$id dropped $dropped $noun"
+    }
+
   // --- Outcomes -----------------------------------------------------------
 
   /**
@@ -173,6 +193,40 @@ final class Store(connection: Connection) {
         id
       }
     }
+  }
+
+  /**
+   * Sets the Outcome's Objective, whether it had none or a different one, and
+   * clears the emergency flag. No record of the previous parent is kept, and
+   * the two must share a Quarter: Objectives are per-Quarter commitments.
+   */
+  def parentOutcome(
+      outcomeNeedle: String,
+      objectiveNeedle: String
+  ): Either[String, String] =
+    for {
+      outcomeId <- resolveOutcome(outcomeNeedle)
+      outcome <- outcomeById(outcomeId).toRight(s"no Outcome $outcomeId")
+      objectiveId <- resolveObjective(objectiveNeedle)
+      committed <- objectiveQuarter(objectiveId).toRight(s"no Quarterly Objective $objectiveId")
+      _ <-
+        if (committed == outcome.quarter) Right(())
+        else
+          Left(s"Quarterly Objective $objectiveId is committed in $committed, not ${outcome.quarter}")
+    } yield {
+      reparent(outcomeId, objectiveId)
+      s"$outcomeId parented to $objectiveId"
+    }
+
+  private def reparent(outcomeId: String, objectiveId: String): Unit = {
+    val ps = connection.prepareStatement(
+      "UPDATE outcome SET objective_id = ?, emergency = 0 WHERE id = ?"
+    )
+    try {
+      ps.setString(1, objectiveId)
+      ps.setString(2, outcomeId)
+      ps.executeUpdate()
+    } finally ps.close()
   }
 
   /** The current Quarter's queue in rank order; `includeClosed` adds terminal Outcomes. */
@@ -265,6 +319,55 @@ final class Store(connection: Connection) {
         |) ORDER BY quarter""".stripMargin,
       _ => ()
     )(_.getString("quarter"))
+
+  // --- Planning gaps ------------------------------------------------------
+
+  /**
+   * The three kinds of hole in `quarter`'s plan: Career Goals with no Objective
+   * committed in it, Objectives with no Outcomes, and Outcomes with no
+   * Objective that are not emergencies. Archived Goals are never Gaps.
+   */
+  def review(quarter: String): Gaps = {
+    val aligned = query(
+      "SELECT goal_id FROM objective WHERE quarter = ?",
+      _.setString(1, quarter)
+    )(_.getString("goal_id")).toSet
+    val unaligned = goals(archived = false).filterNot(goal => aligned(goal.id))
+    val empty = objectivesIn(quarter).filterNot(objective => hasOutcomes(objective.id))
+    val parentless = query(
+      s"""SELECT $OutcomeColumns FROM outcome
+         |WHERE quarter = ? AND objective_id IS NULL AND emergency = 0
+         |ORDER BY rank""".stripMargin,
+      _.setString(1, quarter)
+    )(readOutcome).map(withVerification)
+    Gaps(quarter, unaligned, empty, parentless)
+  }
+
+  private def objectivesIn(quarter: String): List[QuarterlyObjective] =
+    query(
+      """SELECT id, title, goal_id, quarter, why FROM objective
+        |WHERE quarter = ?
+        |ORDER BY CAST(SUBSTR(id, 4) AS INTEGER)""".stripMargin,
+      _.setString(1, quarter)
+    ) { rs =>
+      QuarterlyObjective(
+        rs.getString("id"),
+        rs.getString("title"),
+        rs.getString("goal_id"),
+        rs.getString("quarter"),
+        Option(rs.getString("why")),
+        Nil
+      )
+    }.map { objective =>
+      objective.copy(
+        verification = verificationFor("objective_verification", "objective_id", objective.id)
+      )
+    }
+
+  private def hasOutcomes(objectiveId: String): Boolean =
+    query("SELECT 1 FROM outcome WHERE objective_id = ? LIMIT 1", _.setString(1, objectiveId))(
+      _ => true
+    ).nonEmpty
 
   // --- Quarter rollover ---------------------------------------------------
 

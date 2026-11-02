@@ -56,6 +56,17 @@ final case class Outcome(
     stage: Stage
 )
 
+/** The Gaps a reviewed Quarter surfaces: holes in the plan, never stored. */
+final case class Gaps(
+    quarter: String,
+    unalignedGoals: List[CareerGoal],
+    emptyObjectives: List[QuarterlyObjective],
+    parentlessOutcomes: List[Outcome]
+) {
+  def isEmpty: Boolean =
+    unalignedGoals.isEmpty && emptyObjectives.isEmpty && parentlessOutcomes.isEmpty
+}
+
 /** Quarters are values, never rows: `YYYY-Qn`, derived from a calendar date. */
 object Quarter {
 

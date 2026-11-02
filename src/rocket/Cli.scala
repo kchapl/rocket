@@ -122,13 +122,54 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
         else quarters.foreach(out.println)
       }
       0
+    case "review" :: Nil         => quarterReview(Quarter.current)
+    case "review" :: name :: Nil => quarterReview(name)
+    case "review" :: _ =>
+      err.println("usage: rocket quarter review [quarter]")
+      2
     case _ =>
-      err.println("usage: rocket quarter [current | list]")
+      err.println("usage: rocket quarter [current | list | review [quarter]]")
       2
   }
 
+  /** Reports the reviewed Quarter's Gaps: Unaligned Goals, Empty Objectives, Parentless Outcomes. */
+  private def quarterReview(name: String): Int =
+    if (Quarter.index(name).isEmpty) {
+      err.println(s"not a Quarter: $name")
+      2
+    } else
+      withStore { store =>
+        val gaps = store.review(name)
+        if (gaps.isEmpty) out.println(s"$name: no Gaps")
+        else {
+          out.println(name)
+          section("Unaligned Goals", gaps.unalignedGoals.map(goal => s"${goal.id}  ${goal.title}"))
+          section(
+            "Empty Objectives",
+            gaps.emptyObjectives.map(objective =>
+              s"${objective.id}  ${objective.title}  (${objective.goalId})"
+            )
+          )
+          section(
+            "Parentless Outcomes",
+            gaps.parentlessOutcomes.map(outcome => s"${outcome.id}  ${outcome.title}")
+          )
+        }
+        0
+      }
+
+  private def section(heading: String, lines: List[String]): Unit =
+    if (lines.nonEmpty) {
+      out.println(s"  $heading")
+      lines.foreach(line => out.println(s"    $line"))
+    }
+
   private def objective(args: List[String]): Int = args match {
-    case "add" :: rest => objectiveAdd(rest)
+    case "add" :: rest            => objectiveAdd(rest)
+    case "drop" :: id :: Nil      => report(_.dropObjective(id))
+    case "drop" :: _ =>
+      err.println("usage: rocket objective drop <id>")
+      2
     case Nil =>
       err.println("usage: rocket objective add <title> --goal <id>")
       2
@@ -166,6 +207,11 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
 
   private def outcome(args: List[String]): Int = args match {
     case "add" :: rest => outcomeAdd(rest)
+    case "parent" :: outcomeId :: objectiveId :: Nil =>
+      report(_.parentOutcome(outcomeId, objectiveId))
+    case "parent" :: _ =>
+      err.println("usage: rocket outcome parent <outcome-id> <objective-id>")
+      2
     case Nil =>
       err.println("usage: rocket outcome add [--objective <id> | --emergency] <title>")
       2
@@ -359,10 +405,13 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     stream.println("  rocket career list [--archived]")
     stream.println("  rocket career archive <id> | unarchive <id>")
     stream.println("  rocket quarter [current | list]")
+    stream.println("  rocket quarter review [quarter]")
     stream.println("  rocket objective add <title> --goal <id> [--why <text>] [--verification <text>]...")
+    stream.println("  rocket objective drop <id>")
     stream.println(
       "  rocket outcome add [--objective <id> | --emergency] <title> [--why <text>] [--verification <text>]..."
     )
+    stream.println("  rocket outcome parent <outcome-id> <objective-id>")
     stream.println()
     stream.println("Throughput Mode")
     stream.println("  rocket backlog [list] [--all]")
