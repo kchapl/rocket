@@ -49,7 +49,8 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     case "list" :: rest                  => careerList(rest)
     case "archive" :: id :: Nil          => setArchived(id, archived = true)
     case "unarchive" :: id :: Nil        => setArchived(id, archived = false)
-    case "rename" :: id :: rest         => renameGoal(id, rest)
+    case "rename" :: id :: rest =>
+      rename(id, rest, (store, needle, title) => store.renameGoal(needle, title))
     case ("archive" | "unarchive") :: _  =>
       err.println("usage: rocket career archive <id>")
       2
@@ -104,7 +105,12 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       }
     }
 
-  private def renameGoal(id: String, words: List[String]): Int =
+  /** A rename is the same at every tier: resolve what was named, then rewrite its Claim. */
+  private def rename(
+      id: String,
+      words: List[String],
+      action: (Store, String, String) => Either[String, String]
+  ): Int =
     words.find(_.startsWith("--")) match {
       case Some(unknown) =>
         err.println(s"unknown flag: $unknown")
@@ -114,8 +120,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
         if (title.isEmpty) {
           err.println("a title is required")
           2
-        } else
-          report(store => store.renameGoal(id, title).map(resolved => s"$resolved renamed"))
+        } else report(store => action(store, id, title).map(resolved => s"$resolved renamed"))
     }
 
   private def emptyMessage(archived: Boolean): String =
@@ -185,8 +190,13 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     }
 
   private def objective(args: List[String]): Int = args match {
-    case "add" :: rest            => objectiveAdd(rest)
-    case "drop" :: id :: Nil      => report(_.dropObjective(id))
+    case "add" :: rest          => objectiveAdd(rest)
+    case "rename" :: id :: rest =>
+      rename(id, rest, (store, needle, title) => store.renameObjective(needle, title))
+    case "rename" :: _ =>
+      err.println("usage: rocket objective rename <id> <title>")
+      2
+    case "drop" :: id :: Nil    => report(_.dropObjective(id))
     case "drop" :: _ =>
       err.println("usage: rocket objective drop <id>")
       2
@@ -226,7 +236,12 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
   // --- Planning Mode: Outcomes --------------------------------------------
 
   private def outcome(args: List[String]): Int = args match {
-    case "add" :: rest => outcomeAdd(rest)
+    case "add" :: rest          => outcomeAdd(rest)
+    case "rename" :: id :: rest =>
+      rename(id, rest, (store, needle, title) => store.renameOutcome(needle, title))
+    case "rename" :: _ =>
+      err.println("usage: rocket outcome rename <id> <title>")
+      2
     case "parent" :: outcomeId :: objectiveId :: Nil =>
       report(_.parentOutcome(outcomeId, objectiveId))
     case "parent" :: _ =>
@@ -560,10 +575,12 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     stream.println("  rocket quarter review [quarter]")
     stream.println("  rocket objective add <title> --goal <id> [--why <text>] [--verification <text>]...")
     stream.println("  rocket objective drop <id>")
+    stream.println("  rocket objective rename <id> <title>")
     stream.println(
       "  rocket outcome add [--objective <id> | --emergency] <title> [--why <text>] [--verification <text>]..."
     )
     stream.println("  rocket outcome parent <outcome-id> <objective-id>")
+    stream.println("  rocket outcome rename <id> <title>")
     stream.println("  rocket inbox add <text>")
     stream.println("  rocket inbox list [--all]")
     stream.println("  rocket inbox promote <id> [--to-goal | --to-obj <goal-id> | --to-out]")

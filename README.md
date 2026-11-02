@@ -60,10 +60,12 @@ Both modes: the hierarchy is shaped in Planning Mode and worked in Throughput Mo
 | `rocket quarter review [quarter]` | Report the Quarter's Gaps: Unaligned Goals, Empty Objectives, Parentless Outcomes |
 | `rocket objective add <title> --goal <id> [--why <text>] [--verification <text>]...` | Commit a Quarterly Objective to the current Quarter |
 | `rocket objective drop <id>` | Drop an Objective by dropping every `open` Outcome under it |
+| `rocket objective rename <id> <title>` | Rename a Quarterly Objective, keeping its Goal and Quarter |
 | `rocket outcome add --objective <id> <title> [--why <text>] [--verification <text>]...` | Plan an Outcome under an Objective |
 | `rocket outcome add <title> [--why <text>] [--verification <text>]...` | Plan an unfiled Outcome — parentless and unflagged |
 | `rocket outcome add --emergency <title>` | Add an unparented emergency Outcome |
 | `rocket outcome parent <outcome-id> <objective-id>` | File an Outcome under an Objective, clearing the emergency flag |
+| `rocket outcome rename <id> <title>` | Rename an Outcome, keeping its Status, Stage and place in the queue |
 | `rocket inbox add <text>` | Capture an Idea |
 | `rocket inbox list [--all]` | List `pending` Ideas; `--all` also shows promoted and discarded ones |
 | `rocket inbox promote <id> [--to-goal \| --to-obj <goal-id> \| --to-out]` | Turn an Idea into a Goal, Objective or parentless Outcome; the Idea is kept, recording what it became |

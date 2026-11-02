@@ -63,14 +63,18 @@ final class Store(connection: Connection) {
   /** Renames a Goal. The id is what everything points at, so nothing else moves. */
   def renameGoal(needle: String, title: String): Either[String, String] =
     resolveGoal(needle).map { id =>
-      val ps = connection.prepareStatement("UPDATE goal SET title = ? WHERE id = ?")
-      try {
-        ps.setString(1, title)
-        ps.setString(2, id)
-        ps.executeUpdate()
-      } finally ps.close()
+      setTitle("goal", id, title)
       id
     }
+
+  private def setTitle(table: String, id: String, title: String): Unit = {
+    val ps = connection.prepareStatement(s"UPDATE $table SET title = ? WHERE id = ?")
+    try {
+      ps.setString(1, title)
+      ps.setString(2, id)
+      ps.executeUpdate()
+    } finally ps.close()
+  }
 
   // --- Quarterly Objectives ----------------------------------------------
 
@@ -112,6 +116,13 @@ final class Store(connection: Connection) {
 
   def resolveObjective(needle: String): Either[String, String] =
     resolve(needle, "objective", "Quarterly Objective")
+
+  /** Renames an Objective. Only the Claim moves: its Goal, Quarter and Verifications stay. */
+  def renameObjective(needle: String, title: String): Either[String, String] =
+    resolveObjective(needle).map { id =>
+      setTitle("objective", id, title)
+      id
+    }
 
   private def objectiveById(id: String): Option[QuarterlyObjective] =
     query(
@@ -258,6 +269,13 @@ final class Store(connection: Connection) {
 
   def resolveOutcome(needle: String): Either[String, String] =
     resolve(needle, "outcome", "Outcome")
+
+  /** Renames an Outcome, keeping its Status, Stage, parent and place in the queue. */
+  def renameOutcome(needle: String, title: String): Either[String, String] =
+    resolveOutcome(needle).map { id =>
+      setTitle("outcome", id, title)
+      id
+    }
 
   // --- Throughput ---------------------------------------------------------
 
