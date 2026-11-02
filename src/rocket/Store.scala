@@ -320,6 +320,115 @@ final class Store(connection: Connection) {
       _ => ()
     )(_.getString("quarter"))
 
+  // --- Ideas --------------------------------------------------------------
+
+  /** Captures a raw thought. It has no Quarter and no parent; it commits nothing. */
+  def captureIdea(text: String): String = {
+    val id = nextId("idea", "idea")
+    val ps = connection.prepareStatement(
+      "INSERT INTO idea(id, text, disposition, promoted_to, captured_at) VALUES (?, ?, 'pending', NULL, ?)"
+    )
+    try {
+      ps.setString(1, id)
+      ps.setString(2, text)
+      ps.setString(3, Instant.now().toString)
+      ps.executeUpdate()
+    } finally ps.close()
+    id
+  }
+
+  def resolveIdea(needle: String): Either[String, String] =
+    resolve(needle, "idea", "Idea", "text")
+
+  /** `pending` Ideas, or the whole record when `all` is set: none is ever deleted. */
+  def ideas(all: Boolean): List[Idea] = {
+    val filter = if (all) "" else " WHERE disposition = 'pending'"
+    query(
+      s"""SELECT id, text, disposition, promoted_to, captured_at FROM idea$filter
+         |ORDER BY CAST(SUBSTR(id, 5) AS INTEGER)""".stripMargin,
+      _ => ()
+    )(readIdea)
+  }
+
+  /** Marks an Idea discarded. It stays as the record of the decision, not as garbage. */
+  def discardIdea(needle: String): Either[String, String] =
+    pendingIdea(needle).map { idea =>
+      val ps = connection.prepareStatement("UPDATE idea SET disposition = 'discarded' WHERE id = ?")
+      try {
+        ps.setString(1, idea.id)
+        ps.executeUpdate()
+      } finally ps.close()
+      s"${idea.id} discarded"
+    }
+
+  /**
+   * Turns an Idea into a Career Goal, a Quarterly Objective or an Outcome. The
+   * Idea outlives the verdict, recording the id of what it became, and the two
+   * writes share one transaction.
+   */
+  def promoteIdea(needle: String, promotion: Promotion): Either[String, String] =
+    pendingIdea(needle).flatMap { idea =>
+      inTransaction {
+        promotion match {
+          case Promotion.ToGoal =>
+            val id = createGoal(idea.text, None, Nil)
+            markPromoted(idea.id, id)
+            Right(id)
+          case Promotion.ToObjective(goalNeedle) =>
+            createObjective(idea.text, goalNeedle, None, Nil).map { id =>
+              markPromoted(idea.id, id)
+              id
+            }
+          case Promotion.ToOutcome =>
+            createOutcome(idea.text, None, false, None, Nil).map { id =>
+              markPromoted(idea.id, id)
+              id
+            }
+        }
+      }
+    }
+
+  /** The Idea a verdict can still act on: `promoted` and `discarded` are final. */
+  private def pendingIdea(needle: String): Either[String, Idea] =
+    resolveIdea(needle).flatMap { id =>
+      ideaById(id) match {
+        case None => Left(s"no Idea $needle")
+        case Some(idea) if idea.disposition != Disposition.Pending =>
+          Left(s"${idea.id} is already ${idea.disposition.wire}")
+        case Some(idea) => Right(idea)
+      }
+    }
+
+  private def ideaById(id: String): Option[Idea] =
+    query(
+      "SELECT id, text, disposition, promoted_to, captured_at FROM idea WHERE id = ?",
+      _.setString(1, id)
+    )(readIdea).headOption
+
+  private def markPromoted(ideaId: String, targetId: String): Unit = {
+    val ps = connection.prepareStatement(
+      "UPDATE idea SET disposition = 'promoted', promoted_to = ? WHERE id = ?"
+    )
+    try {
+      ps.setString(1, targetId)
+      ps.setString(2, ideaId)
+      ps.executeUpdate()
+    } finally ps.close()
+  }
+
+  private def readIdea(rs: ResultSet): Idea = {
+    val raw = rs.getString("disposition")
+    Idea(
+      rs.getString("id"),
+      rs.getString("text"),
+      Disposition
+        .parse(raw)
+        .getOrElse(throw new IllegalStateException(s"unknown disposition: $raw")),
+      Option(rs.getString("promoted_to")),
+      rs.getString("captured_at")
+    )
+  }
+
   // --- Planning gaps ------------------------------------------------------
 
   /**
@@ -461,12 +570,17 @@ final class Store(connection: Connection) {
 
   // --- Shared helpers -----------------------------------------------------
 
-  private def resolve(needle: String, table: String, label: String): Either[String, String] = {
-    val ps = connection.prepareStatement(s"SELECT id, title FROM $table")
+  private def resolve(
+      needle: String,
+      table: String,
+      label: String,
+      textColumn: String = "title"
+  ): Either[String, String] = {
+    val ps = connection.prepareStatement(s"SELECT id, $textColumn FROM $table")
     val rows = List.newBuilder[(String, String)]
     try {
       val rs = ps.executeQuery()
-      while (rs.next()) rows += ((rs.getString("id"), rs.getString("title")))
+      while (rs.next()) rows += ((rs.getString("id"), rs.getString(textColumn)))
       rs.close()
     } finally ps.close()
 
@@ -724,17 +838,26 @@ final class Store(connection: Connection) {
     s"$prefix${highest + 1}"
   }
 
-  private def inTransaction[A](body: => A): A = {
-    val previous = connection.getAutoCommit
-    connection.setAutoCommit(false)
-    try {
-      val result = body
-      connection.commit()
-      result
-    } catch {
-      case error: Throwable =>
-        connection.rollback()
-        throw error
-    } finally connection.setAutoCommit(previous)
-  }
+  private var depth = 0
+
+  /** Joins any transaction already open, so nested writes commit or roll back together. */
+  private def inTransaction[A](body: => A): A =
+    if (depth > 0) body
+    else {
+      val previous = connection.getAutoCommit
+      connection.setAutoCommit(false)
+      depth += 1
+      try {
+        val result = body
+        connection.commit()
+        result
+      } catch {
+        case error: Throwable =>
+          connection.rollback()
+          throw error
+      } finally {
+        depth -= 1
+        connection.setAutoCommit(previous)
+      }
+    }
 }

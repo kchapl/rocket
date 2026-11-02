@@ -63,6 +63,10 @@ Both modes: the hierarchy is shaped in Planning Mode and worked in Throughput Mo
 | `rocket outcome add <title> [--why <text>] [--verification <text>]...` | Plan an unfiled Outcome — parentless and unflagged |
 | `rocket outcome add --emergency <title>` | Add an unparented emergency Outcome |
 | `rocket outcome parent <outcome-id> <objective-id>` | File an Outcome under an Objective, clearing the emergency flag |
+| `rocket inbox add <text>` | Capture an Idea |
+| `rocket inbox list [--all]` | List `pending` Ideas; `--all` also shows promoted and discarded ones |
+| `rocket inbox promote <id> [--to-goal \| --to-obj <goal-id> \| --to-out]` | Turn an Idea into a Goal, Objective or parentless Outcome; the Idea is kept, recording what it became |
+| `rocket inbox discard <id>` | Mark an Idea `discarded`; it stays as the record of the decision |
 | `rocket backlog [list] [--all]` | The Quarter's ranked queue of `open` Outcomes; `--all` adds achieved and dropped |
 | `rocket backlog reorder <id> <+N \| -N>` | Move an Outcome within the Quarter's queue; terminal Outcomes keep their slot |
 | `rocket progress start <id>` | Move an Outcome's stage from `todo` to `doing` |
@@ -77,6 +81,6 @@ Notice: 2026-Q1–Q3 closed. Carried forward 4 open outcomes into 2026-Q4.
 
 Repeatable `--verification` flags keep the order given. Ids accept an exact id or a unique case-insensitive prefix of the id or title. Exit codes: `0` success, `1` domain error (unknown or ambiguous id, archived Goal, cross-Quarter parent, already-closed Outcome), `2` usage error.
 
-Not yet implemented: `inbox`, `trace`, `export` and `import`.
+Not yet implemented: `career rename`, `trace`, `export` and `import`.
 
 Tests: `scala-cli test .`

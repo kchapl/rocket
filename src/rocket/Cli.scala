@@ -29,6 +29,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     case "quarter" :: rest      => quarter(rest)
     case "objective" :: rest    => objective(rest)
     case "outcome" :: rest      => outcome(rest)
+    case "inbox" :: rest        => inbox(rest)
     case "backlog" :: rest      => backlog(rest)
     case "progress" :: rest     => progress(rest)
     case other :: _             =>
@@ -252,6 +253,93 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
         }
     }
 
+  // --- Planning Mode: Ideas -----------------------------------------------
+
+  private def inbox(args: List[String]): Int = args match {
+    case "add" :: rest          => inboxAdd(rest)
+    case "list" :: rest         => inboxList(rest)
+    case "promote" :: rest      => inboxPromote(rest)
+    case "discard" :: id :: Nil => report(_.discardIdea(id))
+    case "discard" :: _ =>
+      err.println("usage: rocket inbox discard <id>")
+      2
+    case Nil =>
+      err.println("usage: rocket inbox <add|list|promote|discard>")
+      2
+    case other :: _ =>
+      err.println(s"unknown inbox command: $other")
+      usage(err)
+      2
+  }
+
+  private def inboxAdd(args: List[String]): Int =
+    args.find(_.startsWith("--")) match {
+      case Some(unknown) =>
+        err.println(s"unknown flag: $unknown")
+        2
+      case None =>
+        val text = args.mkString(" ")
+        if (text.isEmpty) {
+          err.println("an Idea needs text")
+          2
+        } else
+          withStore { store =>
+            out.println(store.captureIdea(text))
+            0
+          }
+    }
+
+  private def inboxList(args: List[String]): Int =
+    args.find(flag => flag.startsWith("--") && flag != "--all") match {
+      case Some(unknown) =>
+        err.println(s"unknown flag: $unknown")
+        2
+      case None =>
+        val all = args.contains("--all")
+        withStore { store =>
+          val ideas = store.ideas(all)
+          if (ideas.isEmpty) out.println(if (all) "no Ideas" else "no pending Ideas")
+          else ideas.foreach(printIdea)
+          0
+        }
+    }
+
+  private def inboxPromote(args: List[String]): Int = args match {
+    case Nil =>
+      err.println("usage: rocket inbox promote <id> [--to-goal | --to-obj <goal-id> | --to-out]")
+      2
+    case id :: flags =>
+      parsePromotion(flags) match {
+        case Left(problem) =>
+          err.println(problem)
+          2
+        case Right(promotion) =>
+          report(_.promoteIdea(id, promotion))
+      }
+  }
+
+  private def parsePromotion(flags: List[String]): Either[String, Promotion] = flags match {
+    case "--to-goal" :: Nil        => Right(Promotion.ToGoal)
+    case "--to-out" :: Nil         => Right(Promotion.ToOutcome)
+    case "--to-obj" :: goal :: Nil => Right(Promotion.ToObjective(goal))
+    case "--to-obj" :: Nil          => Left("--to-obj needs a Career Goal")
+    case Nil                        => Left(promoteHint)
+    case _                          => Left(s"promote one Idea one way: $promoteHint")
+  }
+
+  private def promoteHint: String =
+    "--to-goal, --to-obj <goal-id> or --to-out"
+
+  private def printIdea(idea: Idea): Unit = {
+    val verdict = idea.disposition match {
+      case Disposition.Pending   => ""
+      case Disposition.Discarded => "  (discarded)"
+      case Disposition.Promoted =>
+        idea.promotedTo.fold("  (promoted)")(target => s"  (promoted to $target)")
+    }
+    out.println(s"${idea.id}  ${idea.text}$verdict")
+  }
+
   // --- Throughput Mode ----------------------------------------------------
 
   private def backlog(args: List[String]): Int = args match {
@@ -412,6 +500,10 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       "  rocket outcome add [--objective <id> | --emergency] <title> [--why <text>] [--verification <text>]..."
     )
     stream.println("  rocket outcome parent <outcome-id> <objective-id>")
+    stream.println("  rocket inbox add <text>")
+    stream.println("  rocket inbox list [--all]")
+    stream.println("  rocket inbox promote <id> [--to-goal | --to-obj <goal-id> | --to-out]")
+    stream.println("  rocket inbox discard <id>")
     stream.println()
     stream.println("Throughput Mode")
     stream.println("  rocket backlog [list] [--all]")

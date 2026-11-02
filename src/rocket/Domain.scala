@@ -56,6 +56,33 @@ final case class Outcome(
     stage: Stage
 )
 
+/** What became of an Idea. `promoted` and `discarded` are final (ADR 0002). */
+enum Disposition(val wire: String) {
+  case Pending extends Disposition("pending")
+  case Promoted extends Disposition("promoted")
+  case Discarded extends Disposition("discarded")
+}
+
+object Disposition {
+  def parse(raw: String): Option[Disposition] = values.find(_.wire == raw)
+}
+
+/** A raw thought as stored: no Quarter, no parent, and nothing committed by capturing it. */
+final case class Idea(
+    id: String,
+    text: String,
+    disposition: Disposition,
+    promotedTo: Option[String],
+    capturedAt: String
+)
+
+/** What an Idea is being promoted into. */
+enum Promotion {
+  case ToGoal
+  case ToObjective(goal: String)
+  case ToOutcome
+}
+
 /** The Gaps a reviewed Quarter surfaces: holes in the plan, never stored. */
 final case class Gaps(
     quarter: String,
