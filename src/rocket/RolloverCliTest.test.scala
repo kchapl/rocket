@@ -4,10 +4,6 @@ import java.nio.file.Path
 
 class RolloverCliTest extends CliHarness {
 
-  /** The Quarter name `quarters` back from the current one. */
-  private def back(quarters: Int): String =
-    Quarter.at(Quarter.index(Quarter.current).get - quarters)
-
   /** Rewinds a store so its next command sits a boundary or more behind the calendar. */
   private def stale(db: Path, quarters: Int): String = {
     val previous = back(quarters)

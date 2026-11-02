@@ -127,6 +127,52 @@ class CareerCliTest extends CliHarness {
     assertEquals(out.trim, "archived g1")
   }
 
+  test("renaming a Goal keeps its id and changes its title") {
+    val db = tempDb()
+    run(db, "career", "add", "become a staff engineer")
+
+    val (code, out, _) = run(db, "career", "rename", "g1", "become a principal engineer")
+
+    assertEquals(code, 0)
+    assertEquals(out.trim, "g1 renamed")
+    assertEquals(
+      rows(db, "SELECT id, title FROM goal"),
+      List(List("g1", "become a principal engineer"))
+    )
+    assert(run(db, "career", "list")._2.contains("become a principal engineer"))
+  }
+
+  test("a rename resolves the Goal by a unique title prefix") {
+    val db = tempDb()
+    run(db, "career", "add", "run a marathon")
+    run(db, "career", "add", "write a book")
+
+    val (code, out, _) = run(db, "career", "rename", "run", "run a marathon in under four hours")
+
+    assertEquals(code, 0)
+    assertEquals(out.trim, "g1 renamed")
+  }
+
+  test("renaming an unknown Goal is a domain error") {
+    val (code, _, err) = run(tempDb(), "career", "rename", "g9", "something else")
+
+    assertEquals(code, 1)
+    assert(err.contains("no Career Goal g9"), err)
+  }
+
+  test("a rename without a title, or with a flag, is a usage error") {
+    val db = tempDb()
+    run(db, "career", "add", "become a staff engineer")
+
+    val (emptyCode, _, emptyErr) = run(db, "career", "rename", "g1")
+    assertEquals(emptyCode, 2)
+    assert(emptyErr.contains("a title is required"), emptyErr)
+
+    val (flagCode, _, flagErr) = run(db, "career", "rename", "g1", "--why", "x")
+    assertEquals(flagCode, 2)
+    assert(flagErr.contains("unknown flag: --why"), flagErr)
+  }
+
   test("Quarter.of reads the calendar quarter") {
     assertEquals(Quarter.of(LocalDate.of(2026, 1, 1)), "2026-Q1")
     assertEquals(Quarter.of(LocalDate.of(2026, 8, 1)), "2026-Q3")

@@ -29,33 +29,18 @@ final class Store(connection: Connection) {
   }
 
   /** Goals in creation order; `archived` selects which half of the record to show. */
-  def goals(archived: Boolean): List[CareerGoal] = {
-    val ps = connection.prepareStatement(
+  def goals(archived: Boolean): List[CareerGoal] =
+    query(
       """SELECT id, title, why, archived FROM goal
         |WHERE archived = ?
-        |ORDER BY CAST(SUBSTR(id, 2) AS INTEGER)""".stripMargin
-    )
-    val rows = List.newBuilder[(String, String, Option[String], Boolean)]
-    try {
-      ps.setInt(1, if (archived) 1 else 0)
-      val rs = ps.executeQuery()
-      while (rs.next()) {
-        rows += (
-          (
-            rs.getString("id"),
-            rs.getString("title"),
-            Option(rs.getString("why")),
-            rs.getInt("archived") == 1
-          )
-        )
-      }
-      rs.close()
-    } finally ps.close()
+        |ORDER BY CAST(SUBSTR(id, 2) AS INTEGER)""".stripMargin,
+      _.setInt(1, if (archived) 1 else 0)
+    )(readGoal).map(withGoalVerification)
 
-    rows.result().map { case (id, title, why, isArchived) =>
-      CareerGoal(id, title, why, verificationFor("goal_verification", "goal_id", id), isArchived)
-    }
-  }
+  private def goalById(id: String): Option[CareerGoal] =
+    query("SELECT id, title, why, archived FROM goal WHERE id = ?", _.setString(1, id))(readGoal)
+      .headOption
+      .map(withGoalVerification)
 
   /**
    * Resolves a Goal from what the user typed: an exact id first, then a unique
@@ -69,6 +54,18 @@ final class Store(connection: Connection) {
       val ps = connection.prepareStatement("UPDATE goal SET archived = ? WHERE id = ?")
       try {
         ps.setInt(1, if (archived) 1 else 0)
+        ps.setString(2, id)
+        ps.executeUpdate()
+      } finally ps.close()
+      id
+    }
+
+  /** Renames a Goal. The id is what everything points at, so nothing else moves. */
+  def renameGoal(needle: String, title: String): Either[String, String] =
+    resolveGoal(needle).map { id =>
+      val ps = connection.prepareStatement("UPDATE goal SET title = ? WHERE id = ?")
+      try {
+        ps.setString(1, title)
         ps.setString(2, id)
         ps.executeUpdate()
       } finally ps.close()
@@ -115,6 +112,12 @@ final class Store(connection: Connection) {
 
   def resolveObjective(needle: String): Either[String, String] =
     resolve(needle, "objective", "Quarterly Objective")
+
+  private def objectiveById(id: String): Option[QuarterlyObjective] =
+    query(
+      "SELECT id, title, goal_id, quarter, why FROM objective WHERE id = ?",
+      _.setString(1, id)
+    )(readObjective).headOption.map(withObjectiveVerification)
 
   /**
    * Drops an Objective by dropping every open Outcome under it in one
@@ -228,6 +231,18 @@ final class Store(connection: Connection) {
       ps.executeUpdate()
     } finally ps.close()
   }
+
+  /** The Outcome's whole lineage: itself, the Objective it is filed under, and that Goal. */
+  def lineage(outcomeNeedle: String): Either[String, Lineage] =
+    resolveOutcome(outcomeNeedle).flatMap { id =>
+      outcomeById(id).map(withVerification) match {
+        case None => Left(s"no Outcome $id")
+        case Some(outcome) =>
+          val objective = outcome.objectiveId.flatMap(objectiveById)
+          val goal = objective.flatMap(one => goalById(one.goalId))
+          Right(Lineage(outcome, objective, goal))
+      }
+    }
 
   /** The current Quarter's queue in rank order; `includeClosed` adds terminal Outcomes. */
   def backlog(includeClosed: Boolean): List[Outcome] = {
@@ -458,20 +473,34 @@ final class Store(connection: Connection) {
         |WHERE quarter = ?
         |ORDER BY CAST(SUBSTR(id, 4) AS INTEGER)""".stripMargin,
       _.setString(1, quarter)
-    ) { rs =>
-      QuarterlyObjective(
-        rs.getString("id"),
-        rs.getString("title"),
-        rs.getString("goal_id"),
-        rs.getString("quarter"),
-        Option(rs.getString("why")),
-        Nil
-      )
-    }.map { objective =>
-      objective.copy(
-        verification = verificationFor("objective_verification", "objective_id", objective.id)
-      )
-    }
+    )(readObjective).map(withObjectiveVerification)
+
+  private def readObjective(rs: ResultSet): QuarterlyObjective =
+    QuarterlyObjective(
+      rs.getString("id"),
+      rs.getString("title"),
+      rs.getString("goal_id"),
+      rs.getString("quarter"),
+      Option(rs.getString("why")),
+      Nil
+    )
+
+  private def withObjectiveVerification(objective: QuarterlyObjective): QuarterlyObjective =
+    objective.copy(
+      verification = verificationFor("objective_verification", "objective_id", objective.id)
+    )
+
+  private def readGoal(rs: ResultSet): CareerGoal =
+    CareerGoal(
+      rs.getString("id"),
+      rs.getString("title"),
+      Option(rs.getString("why")),
+      Nil,
+      rs.getInt("archived") == 1
+    )
+
+  private def withGoalVerification(goal: CareerGoal): CareerGoal =
+    goal.copy(verification = verificationFor("goal_verification", "goal_id", goal.id))
 
   private def hasOutcomes(objectiveId: String): Boolean =
     query("SELECT 1 FROM outcome WHERE objective_id = ? LIMIT 1", _.setString(1, objectiveId))(

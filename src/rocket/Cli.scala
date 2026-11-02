@@ -30,6 +30,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     case "objective" :: rest    => objective(rest)
     case "outcome" :: rest      => outcome(rest)
     case "inbox" :: rest        => inbox(rest)
+    case "trace" :: rest        => trace(rest)
     case "backlog" :: rest      => backlog(rest)
     case "progress" :: rest     => progress(rest)
     case other :: _             =>
@@ -48,11 +49,15 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     case "list" :: rest                  => careerList(rest)
     case "archive" :: id :: Nil          => setArchived(id, archived = true)
     case "unarchive" :: id :: Nil        => setArchived(id, archived = false)
+    case "rename" :: id :: rest         => renameGoal(id, rest)
     case ("archive" | "unarchive") :: _  =>
       err.println("usage: rocket career archive <id>")
       2
+    case "rename" :: _ =>
+      err.println("usage: rocket career rename <id> <title>")
+      2
     case Nil =>
-      err.println("usage: rocket career <add|list|archive|unarchive>")
+      err.println("usage: rocket career <add|list|archive|unarchive|rename>")
       2
     case other :: _ =>
       err.println(s"unknown career command: $other")
@@ -97,6 +102,20 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
           out.println(if (archived) s"archived $resolved" else s"unarchived $resolved")
           0
       }
+    }
+
+  private def renameGoal(id: String, words: List[String]): Int =
+    words.find(_.startsWith("--")) match {
+      case Some(unknown) =>
+        err.println(s"unknown flag: $unknown")
+        2
+      case None =>
+        val title = words.mkString(" ")
+        if (title.isEmpty) {
+          err.println("a title is required")
+          2
+        } else
+          report(store => store.renameGoal(id, title).map(resolved => s"$resolved renamed"))
     }
 
   private def emptyMessage(archived: Boolean): String =
@@ -412,15 +431,59 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       }
     }
 
-  private def printOutcome(outcome: Outcome): Unit = {
+  private def printOutcome(outcome: Outcome): Unit =
+    out.println(f"${outcome.rank}%d  ${outcome.id}  ${outcome.title}${markers(outcome)}")
+
+  /** The parenthesised facts an Outcome line carries: what is in flight and what is over. */
+  private def markers(outcome: Outcome): String = {
     val doing = if (outcome.stage == Stage.Doing) "  (doing)" else ""
     val emergency = if (outcome.emergency) "  (emergency)" else ""
     val closed = outcome.status match {
       case Status.Open => ""
       case other       => s"  (${other.wire})"
     }
-    out.println(f"${outcome.rank}%d  ${outcome.id}  ${outcome.title}$doing$emergency$closed")
+    doing + emergency + closed
   }
+
+  // --- Utility & Portability ----------------------------------------------
+
+  /** Shows the whole chain the Outcome hangs from, indented from its Goal down to itself. */
+  private def trace(args: List[String]): Int = args match {
+    case id :: Nil =>
+      withStore { store =>
+        store.lineage(id) match {
+          case Left(problem) =>
+            err.println(problem)
+            1
+          case Right(lineage) =>
+            printLineage(lineage)
+            0
+        }
+      }
+    case _ =>
+      err.println("usage: rocket trace <outcome-id>")
+      2
+  }
+
+  private def printLineage(lineage: Lineage): Unit = {
+    var depth = 0
+    lineage.goal.foreach { goal =>
+      out.println(s"${goal.id}  ${goal.title}")
+      depth = 1
+    }
+    lineage.objective.foreach { objective =>
+      out.println(s"${indent(depth)}${objective.id}  ${objective.title}")
+      depth += 1
+    }
+    val parentless =
+      if (lineage.outcome.objectiveId.isEmpty && !lineage.outcome.emergency) "  (parentless)"
+      else ""
+    out.println(
+      s"${indent(depth)}${lineage.outcome.id}  ${lineage.outcome.title}${markers(lineage.outcome)}$parentless"
+    )
+  }
+
+  private def indent(depth: Int): String = "  " * depth
 
   // --- Plumbing -----------------------------------------------------------
 
@@ -492,6 +555,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     stream.println("  rocket career add <title> [--why <text>] [--verification <text>]...")
     stream.println("  rocket career list [--archived]")
     stream.println("  rocket career archive <id> | unarchive <id>")
+    stream.println("  rocket career rename <id> <title>")
     stream.println("  rocket quarter [current | list]")
     stream.println("  rocket quarter review [quarter]")
     stream.println("  rocket objective add <title> --goal <id> [--why <text>] [--verification <text>]...")
@@ -504,6 +568,8 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     stream.println("  rocket inbox list [--all]")
     stream.println("  rocket inbox promote <id> [--to-goal | --to-obj <goal-id> | --to-out]")
     stream.println("  rocket inbox discard <id>")
+    stream.println()
+    stream.println("  rocket trace <outcome-id>")
     stream.println()
     stream.println("Throughput Mode")
     stream.println("  rocket backlog [list] [--all]")

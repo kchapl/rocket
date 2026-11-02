@@ -9,6 +9,10 @@ abstract class CliHarness extends munit.FunSuite {
   protected def tempDb(): Path =
     Files.createTempDirectory("rocket-test").resolve("rocket.db")
 
+  /** The Quarter name `quarters` back from the current one. */
+  protected def back(quarters: Int): String =
+    Quarter.at(Quarter.index(Quarter.current).get - quarters)
+
   protected def run(db: Path, args: String*): (Int, String, String) = {
     val out = new ByteArrayOutputStream()
     val err = new ByteArrayOutputStream()

@@ -83,6 +83,13 @@ enum Promotion {
   case ToOutcome
 }
 
+/** An Outcome's whole upward chain: itself, its Objective and that Objective's Goal. */
+final case class Lineage(
+    outcome: Outcome,
+    objective: Option[QuarterlyObjective],
+    goal: Option[CareerGoal]
+)
+
 /** The Gaps a reviewed Quarter surfaces: holes in the plan, never stored. */
 final case class Gaps(
     quarter: String,
