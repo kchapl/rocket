@@ -1,6 +1,7 @@
 package rocket
 
-import java.sql.{Connection, PreparedStatement, Types}
+import java.sql.{Connection, PreparedStatement, ResultSet, Types}
+import java.time.{Instant, LocalDate, ZoneOffset}
 
 /**
  * Career Goal, Quarterly Objective and Outcome persistence. Ids are allocated
@@ -177,69 +178,93 @@ final class Store(connection: Connection) {
   /** The current Quarter's queue in rank order; `includeClosed` adds terminal Outcomes. */
   def backlog(includeClosed: Boolean): List[Outcome] = {
     val filter = if (includeClosed) "" else " AND status = 'open'"
-    val ps = connection.prepareStatement(
-      s"""SELECT id, title, quarter, objective_id, emergency, why, rank, status, stage
+    query(
+      s"""SELECT $OutcomeColumns
          |FROM outcome
          |WHERE quarter = ?$filter
-         |ORDER BY rank""".stripMargin
-    )
-    val rows = List.newBuilder[
-      (String, String, String, Option[String], Boolean, Option[String], Int, Status, Stage)
-    ]
-    try {
-      ps.setString(1, Quarter.current)
-      val rs = ps.executeQuery()
-      while (rs.next()) {
-        rows += (
-          (
-            rs.getString("id"),
-            rs.getString("title"),
-            rs.getString("quarter"),
-            Option(rs.getString("objective_id")),
-            rs.getInt("emergency") == 1,
-            Option(rs.getString("why")),
-            rs.getInt("rank"),
-            status(rs.getString("status")),
-            stage(rs.getString("stage"))
-          )
-        )
-      }
-      rs.close()
-    } finally ps.close()
-
-    rows.result().map { case (id, title, quarter, objectiveId, emergency, why, rank, s, g) =>
-      Outcome(
-        id,
-        title,
-        quarter,
-        objectiveId,
-        emergency,
-        why,
-        verificationFor("outcome_verification", "outcome_id", id),
-        rank,
-        s,
-        g
-      )
-    }
+         |ORDER BY rank""".stripMargin,
+      _.setString(1, Quarter.current)
+    )(readOutcome).map(withVerification)
   }
 
+  def resolveOutcome(needle: String): Either[String, String] =
+    resolve(needle, "outcome", "Outcome")
+
+  // --- Throughput ---------------------------------------------------------
+
+  /** Moves an open Outcome's Stage to `doing`; nothing else measures progress. */
+  def startOutcome(needle: String): Either[String, String] =
+    openOutcome(needle).map { outcome =>
+      setStage(outcome.id, Stage.Doing)
+      s"${outcome.id} ${Stage.Doing.wire}"
+    }
+
+  /**
+   * Records a completed Time Box against an Outcome, stamped with the Quarter
+   * the box happened in, and starts the work.
+   */
+  def recordBox(needle: String): Either[String, String] =
+    openOutcome(needle).map { outcome =>
+      val now = Instant.now()
+      val quarter = Quarter.of(LocalDate.ofInstant(now, ZoneOffset.UTC))
+      inTransaction {
+        val ps = connection.prepareStatement(
+          "INSERT INTO time_box(outcome_id, quarter, recorded_at) VALUES (?, ?, ?)"
+        )
+        try {
+          ps.setString(1, outcome.id)
+          ps.setString(2, quarter)
+          ps.setString(3, now.toString)
+          ps.executeUpdate()
+        } finally ps.close()
+        setStage(outcome.id, Stage.Doing)
+      }
+      val boxes = boxCount(outcome.id)
+      s"${outcome.id} $boxes ${if (boxes == 1) "box" else "boxes"}"
+    }
+
+  def achieveOutcome(needle: String): Either[String, String] =
+    closeOutcome(needle, Status.Achieved)
+
+  def dropOutcome(needle: String): Either[String, String] =
+    closeOutcome(needle, Status.Dropped)
+
+  /**
+   * Moves an open Outcome by `delta` places within the Quarter's queue and
+   * renumbers the queue 1..n in one transaction. Terminal Outcomes keep the
+   * slot their rank gives them.
+   */
+  def reorderOutcome(needle: String, delta: Int): Either[String, String] =
+    resolveOutcome(needle).flatMap { id =>
+      outcomeById(id) match {
+        case None =>
+          Left(s"no Outcome $id")
+        case Some(outcome) if outcome.quarter != Quarter.current =>
+          Left(s"$id sits in ${outcome.quarter}, not ${Quarter.current}")
+        case Some(outcome) if outcome.status != Status.Open =>
+          Left(s"$id is already ${outcome.status.wire}")
+        case Some(_) =>
+          val queue = rankedQueue(Quarter.current)
+          val openIds = queue.collect { case (rowId, isOpen) if isOpen => rowId }
+          val from = openIds.indexOf(id)
+          val to = math.max(0, math.min(openIds.size - 1, from + delta))
+          val reordered =
+            if (from == to) openIds
+            else openIds.patch(from, Nil, 1).patch(to, List(id), 0)
+          Right(s"$id ${writeRanks(queue, reordered).indexOf(id) + 1}")
+      }
+    }
+
   /** The Quarters present in the record: those stamped on Outcomes or Time Boxes. */
-  def quarters: List[String] = {
-    val ps = connection.prepareStatement(
+  def quarters: List[String] =
+    query(
       """SELECT quarter FROM (
         |  SELECT quarter FROM outcome
         |  UNION
         |  SELECT quarter FROM time_box
-        |) ORDER BY quarter""".stripMargin
-    )
-    val out = List.newBuilder[String]
-    try {
-      val rs = ps.executeQuery()
-      while (rs.next()) out += rs.getString("quarter")
-      rs.close()
-    } finally ps.close()
-    out.result()
-  }
+        |) ORDER BY quarter""".stripMargin,
+      _ => ()
+    )(_.getString("quarter"))
 
   // --- Shared helpers -----------------------------------------------------
 
@@ -309,12 +334,12 @@ final class Store(connection: Connection) {
     } finally ps.close()
   }
 
-  private def status(raw: String): Status =
+  private def statusOf(raw: String): Status =
     Status
       .parse(raw)
       .getOrElse(throw new IllegalStateException(s"unknown outcome status: $raw"))
 
-  private def stage(raw: String): Stage =
+  private def stageOf(raw: String): Stage =
     Stage
       .parse(raw)
       .getOrElse(throw new IllegalStateException(s"unknown outcome stage: $raw"))
@@ -324,6 +349,118 @@ final class Store(connection: Connection) {
       case Some(text) => ps.setString(index, text)
       case None       => ps.setNull(index, Types.VARCHAR)
     }
+
+  private val OutcomeColumns =
+    "id, title, quarter, objective_id, emergency, why, rank, status, stage"
+
+  private def readOutcome(rs: ResultSet): Outcome =
+    Outcome(
+      rs.getString("id"),
+      rs.getString("title"),
+      rs.getString("quarter"),
+      Option(rs.getString("objective_id")),
+      rs.getInt("emergency") == 1,
+      Option(rs.getString("why")),
+      Nil,
+      rs.getInt("rank"),
+      statusOf(rs.getString("status")),
+      stageOf(rs.getString("stage"))
+    )
+
+  private def withVerification(outcome: Outcome): Outcome =
+    outcome.copy(verification = verificationFor("outcome_verification", "outcome_id", outcome.id))
+
+  private def outcomeById(id: String): Option[Outcome] =
+    query(s"SELECT $OutcomeColumns FROM outcome WHERE id = ?", _.setString(1, id))(readOutcome)
+      .headOption
+
+  /** The Outcome a progress command targets: it must still be open. */
+  private def openOutcome(needle: String): Either[String, Outcome] =
+    resolveOutcome(needle).flatMap { id =>
+      outcomeById(id) match {
+        case None => Left(s"no Outcome $id")
+        case Some(outcome) if outcome.status != Status.Open =>
+          Left(s"$id is already ${outcome.status.wire}")
+        case Some(outcome) => Right(outcome)
+      }
+    }
+
+  private def closeOutcome(needle: String, status: Status): Either[String, String] =
+    openOutcome(needle).map { outcome =>
+      val ps = connection.prepareStatement("UPDATE outcome SET status = ? WHERE id = ?")
+      try {
+        ps.setString(1, status.wire)
+        ps.setString(2, outcome.id)
+        ps.executeUpdate()
+      } finally ps.close()
+      s"${outcome.id} ${status.wire}"
+    }
+
+  private def setStage(id: String, stage: Stage): Unit = {
+    val ps = connection.prepareStatement("UPDATE outcome SET stage = ? WHERE id = ?")
+    try {
+      ps.setString(1, stage.wire)
+      ps.setString(2, id)
+      ps.executeUpdate()
+    } finally ps.close()
+  }
+
+  private def boxCount(outcomeId: String): Int =
+    query("SELECT COUNT(*) FROM time_box WHERE outcome_id = ?", _.setString(1, outcomeId))(
+      _.getInt(1)
+    ).headOption.getOrElse(0)
+
+  private def rankedQueue(quarter: String): List[(String, Boolean)] =
+    query("SELECT id, status FROM outcome WHERE quarter = ? ORDER BY rank", _.setString(1, quarter))(
+      rs => (rs.getString("id"), rs.getString("status") == Status.Open.wire)
+    )
+
+  /**
+   * Rewrites the Quarter's ranks 1..n, keeping terminal Outcomes in the slots
+   * they occupied, and returns the resulting order. Ranks shift through spare
+   * negative values first: SQLite cannot defer `UNIQUE(quarter, rank)`.
+   */
+  private def writeRanks(queue: List[(String, Boolean)], openIds: List[String]): List[String] =
+    inTransaction {
+      val negate = connection.prepareStatement("UPDATE outcome SET rank = -rank WHERE quarter = ?")
+      try {
+        negate.setString(1, Quarter.current)
+        negate.executeUpdate()
+      } finally negate.close()
+
+      var remaining = openIds
+      val ordered = queue.map { case (rowId, isOpen) =>
+        if (isOpen) {
+          val next = remaining.head
+          remaining = remaining.tail
+          next
+        } else rowId
+      }
+
+      val assign = connection.prepareStatement("UPDATE outcome SET rank = ? WHERE id = ?")
+      try {
+        ordered.zipWithIndex.foreach { case (rowId, index) =>
+          assign.setInt(1, index + 1)
+          assign.setString(2, rowId)
+          assign.executeUpdate()
+        }
+      } finally assign.close()
+      ordered
+    }
+
+  private def query[A](sql: String, bind: PreparedStatement => Unit)(
+      read: ResultSet => A
+  ): List[A] = {
+    val ps = connection.prepareStatement(sql)
+    val rows = List.newBuilder[A]
+    try {
+      bind(ps)
+      val rs = ps.executeQuery()
+      while (rs.next()) rows += read(rs)
+      rs.close()
+    } finally ps.close()
+    rows.result()
+  }
 
   private def verificationFor(table: String, ownerColumn: String, ownerId: String): List[String] = {
     val ps = connection.prepareStatement(

@@ -1,24 +1,8 @@
 package rocket
 
-import java.io.{ByteArrayOutputStream, PrintStream}
-import java.nio.file.{Files, Path}
 import java.time.LocalDate
 
-class CareerCliTest extends munit.FunSuite {
-
-  private def tempDb(): Path =
-    Files.createTempDirectory("rocket-test").resolve("rocket.db")
-
-  private def run(db: Path, args: String*): (Int, String, String) = {
-    val out = new ByteArrayOutputStream()
-    val err = new ByteArrayOutputStream()
-    val cli = new Cli(
-      db,
-      new PrintStream(out, true, "UTF-8"),
-      new PrintStream(err, true, "UTF-8")
-    )
-    (cli.run(args.toList), out.toString("UTF-8"), err.toString("UTF-8"))
-  }
+class CareerCliTest extends CliHarness {
 
   test("a Career Goal added by one invocation is listed by the next") {
     val db = tempDb()

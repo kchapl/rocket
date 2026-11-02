@@ -15,6 +15,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     case "objective" :: rest    => objective(rest)
     case "outcome" :: rest      => outcome(rest)
     case "backlog" :: rest      => backlog(rest)
+    case "progress" :: rest     => progress(rest)
     case other :: _             =>
       err.println(s"unknown command: $other")
       usage(err)
@@ -189,26 +190,75 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
 
   // --- Throughput Mode ----------------------------------------------------
 
-  private def backlog(args: List[String]): Int = {
-    val unknown = args.filterNot(argument => argument == "list" || argument == "--all")
-    if (unknown.nonEmpty) {
-      err.println(s"unknown argument: ${unknown.head}")
+  private def backlog(args: List[String]): Int = args match {
+    case "reorder" :: id :: delta :: Nil => reorder(id, delta)
+    case "reorder" :: _ =>
+      err.println("usage: rocket backlog reorder <id> <+N | -N>")
       2
-    } else if (args.count(_ == "list") > 1) {
-      err.println("usage: rocket backlog [list] [--all]")
+    case _ =>
+      val unknown = args.filterNot(argument => argument == "list" || argument == "--all")
+      if (unknown.nonEmpty) {
+        err.println(s"unknown argument: ${unknown.head}")
+        2
+      } else if (args.count(_ == "list") > 1) {
+        err.println("usage: rocket backlog [list] [--all]")
+        2
+      } else {
+        val all = args.contains("--all")
+        withStore { store =>
+          val outcomes = store.backlog(all)
+          if (outcomes.isEmpty) {
+            val kind = if (all) "Outcomes" else "open Outcomes"
+            out.println(s"no $kind in ${Quarter.current}")
+          } else outcomes.foreach(printOutcome)
+          0
+        }
+      }
+  }
+
+  private val Move = "^[+-]\\d+$".r
+
+  private def reorder(id: String, raw: String): Int =
+    if (!Move.matches(raw)) {
+      err.println(s"$raw is not a move: write +N or -N")
       2
-    } else {
-      val all = args.contains("--all")
-      withStore { store =>
-        val outcomes = store.backlog(all)
-        if (outcomes.isEmpty) {
-          val kind = if (all) "Outcomes" else "open Outcomes"
-          out.println(s"no $kind in ${Quarter.current}")
-        } else outcomes.foreach(printOutcome)
-        0
+    } else
+      raw.toIntOption match {
+        case None =>
+          err.println(s"$raw is out of range")
+          2
+        case Some(delta) =>
+          report(_.reorderOutcome(id, delta))
+      }
+
+  private def progress(args: List[String]): Int = args match {
+    case "start" :: id :: Nil   => report(_.startOutcome(id))
+    case "box" :: id :: Nil     => report(_.recordBox(id))
+    case "achieve" :: id :: Nil => report(_.achieveOutcome(id))
+    case "drop" :: id :: Nil    => report(_.dropOutcome(id))
+    case verb :: Nil =>
+      err.println(s"usage: rocket progress $verb <id>")
+      2
+    case Nil =>
+      err.println("usage: rocket progress <start|box|achieve|drop> <id>")
+      2
+    case other :: _ =>
+      err.println(s"unknown progress command: $other")
+      usage(err)
+      2
+  }
+
+  private def report(action: Store => Either[String, String]): Int =
+    withStore { store =>
+      action(store) match {
+        case Left(problem) =>
+          err.println(problem)
+          1
+        case Right(message) =>
+          out.println(message)
+          0
       }
     }
-  }
 
   private def printOutcome(outcome: Outcome): Unit = {
     val doing = if (outcome.stage == Stage.Doing) "  (doing)" else ""
@@ -298,5 +348,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     stream.println()
     stream.println("Throughput Mode")
     stream.println("  rocket backlog [list] [--all]")
+    stream.println("  rocket backlog reorder <id> <+N | -N>")
+    stream.println("  rocket progress start|box|achieve|drop <id>")
   }
 }

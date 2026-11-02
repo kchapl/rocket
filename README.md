@@ -48,7 +48,7 @@ ROCKET_DB=/tmp/scratch.db scala-cli run . -- career list
 
 ## What works today
 
-The Planning half of the hierarchy, and a read-only view of the Backlog:
+Both modes: the hierarchy is shaped in Planning Mode and worked in Throughput Mode.
 
 | Command | Purpose |
 |---|---|
@@ -61,9 +61,13 @@ The Planning half of the hierarchy, and a read-only view of the Backlog:
 | `rocket outcome add <title> [--why <text>] [--verification <text>]...` | Plan an unfiled Outcome — parentless and unflagged |
 | `rocket outcome add --emergency <title>` | Add an unparented emergency Outcome |
 | `rocket backlog [list] [--all]` | The Quarter's ranked queue of `open` Outcomes; `--all` adds achieved and dropped |
+| `rocket backlog reorder <id> <+N \| -N>` | Move an Outcome within the Quarter's queue; terminal Outcomes keep their slot |
+| `rocket progress start <id>` | Move an Outcome's stage from `todo` to `doing` |
+| `rocket progress box <id>` | Record a completed Time Box against the current Quarter, and start the work |
+| `rocket progress achieve <id>` / `drop <id>` | Close an Outcome; a closed Outcome takes no further Time Box |
 
-Repeatable `--verification` flags keep the order given. Ids accept an exact id or a unique case-insensitive prefix of the id or title. Exit codes: `0` success, `1` domain error (unknown or ambiguous id, archived Goal, cross-Quarter parent), `2` usage error.
+Repeatable `--verification` flags keep the order given. Ids accept an exact id or a unique case-insensitive prefix of the id or title. Exit codes: `0` success, `1` domain error (unknown or ambiguous id, archived Goal, cross-Quarter parent, already-closed Outcome), `2` usage error.
 
-Not yet implemented: Quarter rollover, `quarter review`, `objective drop`, `outcome parent`, `progress`, `inbox`, `trace`, `export` and `import`.
+Not yet implemented: Quarter rollover, `quarter review`, `objective drop`, `outcome parent`, `inbox`, `trace`, `export` and `import`.
 
 Tests: `scala-cli test .`
