@@ -7,9 +7,116 @@ import scala.annotation.tailrec
 /** The command surface. Returns the process exit code: 0 ok, 1 domain error, 2 usage error. */
 final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
 
+  // --- The command surface, as data ---------------------------------------
+
+  /**
+   * Each noun's slice of the surface is declared once here and rendered twice:
+   * as part of the whole surface, and as the noun's own help. Both read the
+   * same lines, so a verb added for one cannot go missing from the other.
+   */
+  private object Surface {
+
+    final case class Noun(name: String, summary: String, commands: List[String])
+
+    /** Nouns sharing a heading; `None` prints no heading, for utility commands. */
+    final case class Group(heading: Option[String], nouns: List[Noun])
+
+    val career = Noun(
+      "career",
+      "Career Goals: the long-term ambitions, archived once no longer pursued",
+      List(
+        "rocket career add <title> [--why <text>] [--verification <text>]...",
+        "rocket career list [--archived]",
+        "rocket career archive <id> | unarchive <id>",
+        "rocket career rename <id> <title>"
+      )
+    )
+
+    val quarter = Noun(
+      "quarter",
+      "the Quarter itself, and the Gaps in its plan",
+      List(
+        "rocket quarter [current | list]",
+        "rocket quarter review [quarter]"
+      )
+    )
+
+    val objective = Noun(
+      "objective",
+      "Quarterly Objectives: what is committed to within the Quarter",
+      List(
+        "rocket objective add <title> --goal <id> [--why <text>] [--verification <text>]...",
+        "rocket objective drop <id>",
+        "rocket objective rename <id> <title>"
+      )
+    )
+
+    val outcome = Noun(
+      "outcome",
+      "Outcomes: the units of work, filed under an Objective or standing outside one",
+      List(
+        "rocket outcome add [--objective <id> | --emergency] <title> [--why <text>] [--verification <text>]...",
+        "rocket outcome parent <outcome-id> <objective-id>",
+        "rocket outcome rename <id> <title>"
+      )
+    )
+
+    val inbox = Noun(
+      "inbox",
+      "Ideas: thought captured before it is committed to anything",
+      List(
+        "rocket inbox add <text>",
+        "rocket inbox list [--all]",
+        "rocket inbox promote <id> [--to-goal | --to-obj <goal-id> | --to-out]",
+        "rocket inbox discard <id>"
+      )
+    )
+
+    val trace = Noun(
+      "trace",
+      "the upward lineage of an Outcome",
+      List("rocket trace <outcome-id>")
+    )
+
+    val backlog = Noun(
+      "backlog",
+      "the Quarter's ranked queue of open Outcomes",
+      List(
+        "rocket backlog [list] [--all]",
+        "rocket backlog reorder <id> <+N | -N>"
+      )
+    )
+
+    val progress = Noun(
+      "progress",
+      "work in flight: Stage, Time Boxes and Status",
+      List("rocket progress start|box|achieve|drop <id>")
+    )
+
+    val groups: List[Group] = List(
+      Group(Some("Planning Mode"), List(career, quarter, objective, outcome, inbox)),
+      Group(None, List(trace)),
+      Group(Some("Throughput Mode"), List(backlog, progress))
+    )
+
+    val nouns: List[Noun] = groups.flatMap(_.nouns)
+
+    def noun(name: String): Option[Noun] = nouns.find(_.name == name)
+  }
+
   def run(args: List[String]): Int = args match {
     case Nil                    => usage(out); 0
     case ("--help" | "-h") :: _ => usage(out); 0
+    case noun :: ("--help" | "-h") :: _ =>
+      Surface.noun(noun) match {
+        case Some(found) =>
+          usage(out, found)
+          0
+        case None =>
+          err.println(s"unknown command: $noun")
+          usage(err)
+          2
+      }
     case _ :: _ =>
       rollover()
       dispatch(args)
@@ -58,11 +165,11 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       err.println("usage: rocket career rename <id> <title>")
       2
     case Nil =>
-      err.println("usage: rocket career <add|list|archive|unarchive|rename>")
+      help(err, "career")
       2
     case other :: _ =>
       err.println(s"unknown career command: $other")
-      usage(err)
+      help(err, "career")
       2
   }
 
@@ -152,8 +259,9 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     case "review" :: _ =>
       err.println("usage: rocket quarter review [quarter]")
       2
-    case _ =>
-      err.println("usage: rocket quarter [current | list | review [quarter]]")
+    case other :: _ =>
+      err.println(s"unknown quarter command: $other")
+      help(err, "quarter")
       2
   }
 
@@ -201,11 +309,11 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       err.println("usage: rocket objective drop <id>")
       2
     case Nil =>
-      err.println("usage: rocket objective add <title> --goal <id>")
+      help(err, "objective")
       2
     case other :: _ =>
       err.println(s"unknown objective command: $other")
-      usage(err)
+      help(err, "objective")
       2
   }
 
@@ -248,11 +356,11 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       err.println("usage: rocket outcome parent <outcome-id> <objective-id>")
       2
     case Nil =>
-      err.println("usage: rocket outcome add [--objective <id> | --emergency] <title>")
+      help(err, "outcome")
       2
     case other :: _ =>
       err.println(s"unknown outcome command: $other")
-      usage(err)
+      help(err, "outcome")
       2
   }
 
@@ -298,11 +406,11 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       err.println("usage: rocket inbox discard <id>")
       2
     case Nil =>
-      err.println("usage: rocket inbox <add|list|promote|discard>")
+      help(err, "inbox")
       2
     case other :: _ =>
       err.println(s"unknown inbox command: $other")
-      usage(err)
+      help(err, "inbox")
       2
   }
 
@@ -385,6 +493,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       val unknown = args.filterNot(argument => argument == "list" || argument == "--all")
       if (unknown.nonEmpty) {
         err.println(s"unknown argument: ${unknown.head}")
+        help(err, "backlog")
         2
       } else if (args.count(_ == "list") > 1) {
         err.println("usage: rocket backlog [list] [--all]")
@@ -422,15 +531,15 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     case "box" :: id :: Nil     => report(_.recordBox(id))
     case "achieve" :: id :: Nil => report(_.achieveOutcome(id))
     case "drop" :: id :: Nil    => report(_.dropOutcome(id))
-    case verb :: Nil =>
-      err.println(s"usage: rocket progress $verb <id>")
+    case ("start" | "box" | "achieve" | "drop") :: Nil =>
+      err.println(s"usage: rocket progress ${args.head} <id>")
       2
     case Nil =>
-      err.println("usage: rocket progress <start|box|achieve|drop> <id>")
+      help(err, "progress")
       2
     case other :: _ =>
       err.println(s"unknown progress command: $other")
-      usage(err)
+      help(err, "progress")
       2
   }
 
@@ -464,6 +573,10 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
 
   /** Shows the whole chain the Outcome hangs from, indented from its Goal down to itself. */
   private def trace(args: List[String]): Int = args match {
+    case flag :: _ if flag.startsWith("-") =>
+      err.println(s"unknown argument: $flag")
+      help(err, "trace")
+      2
     case id :: Nil =>
       withStore { store =>
         store.lineage(id) match {
@@ -475,8 +588,12 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
             0
         }
       }
+    case Nil =>
+      help(err, "trace")
+      2
     case _ =>
-      err.println("usage: rocket trace <outcome-id>")
+      err.println("trace takes one Outcome id")
+      help(err, "trace")
       2
   }
 
@@ -565,32 +682,20 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
 
   private def usage(stream: PrintStream): Unit = {
     stream.println("rocket - planning and throughput for a career")
-    stream.println()
-    stream.println("Planning Mode")
-    stream.println("  rocket career add <title> [--why <text>] [--verification <text>]...")
-    stream.println("  rocket career list [--archived]")
-    stream.println("  rocket career archive <id> | unarchive <id>")
-    stream.println("  rocket career rename <id> <title>")
-    stream.println("  rocket quarter [current | list]")
-    stream.println("  rocket quarter review [quarter]")
-    stream.println("  rocket objective add <title> --goal <id> [--why <text>] [--verification <text>]...")
-    stream.println("  rocket objective drop <id>")
-    stream.println("  rocket objective rename <id> <title>")
-    stream.println(
-      "  rocket outcome add [--objective <id> | --emergency] <title> [--why <text>] [--verification <text>]..."
-    )
-    stream.println("  rocket outcome parent <outcome-id> <objective-id>")
-    stream.println("  rocket outcome rename <id> <title>")
-    stream.println("  rocket inbox add <text>")
-    stream.println("  rocket inbox list [--all]")
-    stream.println("  rocket inbox promote <id> [--to-goal | --to-obj <goal-id> | --to-out]")
-    stream.println("  rocket inbox discard <id>")
-    stream.println()
-    stream.println("  rocket trace <outcome-id>")
-    stream.println()
-    stream.println("Throughput Mode")
-    stream.println("  rocket backlog [list] [--all]")
-    stream.println("  rocket backlog reorder <id> <+N | -N>")
-    stream.println("  rocket progress start|box|achieve|drop <id>")
+    Surface.groups.foreach { group =>
+      stream.println()
+      group.heading.foreach(heading => stream.println(heading))
+      group.nouns.foreach(noun => noun.commands.foreach(line => stream.println(s"  $line")))
+    }
   }
+
+  /** One noun's own help, rendering the same lines the whole surface holds for it. */
+  private def usage(stream: PrintStream, noun: Surface.Noun): Unit = {
+    stream.println(s"rocket ${noun.name} - ${noun.summary}")
+    stream.println()
+    noun.commands.foreach(line => stream.println(s"  $line"))
+  }
+
+  private def help(stream: PrintStream, noun: String): Unit =
+    Surface.noun(noun).foreach(found => usage(stream, found))
 }

@@ -91,6 +91,6 @@ class TraceCliTest extends CliHarness {
 
     val (usageCode, _, usageErr) = run(db, "trace")
     assertEquals(usageCode, 2)
-    assert(usageErr.contains("usage: rocket trace <outcome-id>"), usageErr)
+    assert(usageErr.contains("rocket trace <outcome-id>"), usageErr)
   }
 }

@@ -110,11 +110,11 @@ class ThroughputCliTest extends CliHarness {
     assert(err.contains("matches out1, out2"), err)
   }
 
-  test("progress without a verb is a usage error") {
+  test("progress without a verb is a usage error that prints its help") {
     val (code, _, err) = run(tempDb(), "progress")
 
     assertEquals(code, 2)
-    assert(err.contains("usage: rocket progress"), err)
+    assert(err.contains("rocket progress start|box|achieve|drop <id>"), err)
   }
 
   // --- backlog reorder ----------------------------------------------------
