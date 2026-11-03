@@ -36,7 +36,16 @@ scala-cli package . --power -o .scala-build/rocket.jar --assembly --force
 ./.scala-build/rocket.jar career list
 ```
 
-Native-image packaging (DESIGN.md §7, Phase 5) is not set up yet.
+To build a self-contained native binary instead, with no JVM needed at run time:
+
+```sh
+scala-cli package . --power --native-image -o .scala-build/rocket --force -- \
+  --no-fallback --initialize-at-build-time=scala.Enumeration
+./.scala-build/rocket career add "become a staff engineer"
+./.scala-build/rocket career list
+```
+
+The first build downloads GraalVM 17 and takes about a minute; the result is a ~23 MB executable that starts in a few milliseconds. Options after `--` are handed to `native-image`: `--no-fallback` refuses to emit a launcher that still needs a JDK, and `scala.Enumeration` is initialised at build time because the Scala library reads its own fields reflectively, which a native image cannot do at run time. Building needs a C compiler and zlib headers — `build-essential` and `zlib1g-dev` on Debian/Ubuntu. The SQLite driver ships its own GraalVM feature, so it needs no extra configuration.
 
 ## The store
 
