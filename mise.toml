@@ -1,3 +1,15 @@
 [tools]
 java = "27.0.1+0"
 scala-cli = "1.18.0"
+
+[tasks.check]
+description = "Warnings are errors, the suite passes, and sources sit in the right half of src"
+# --server=false: scala-cli 1.18's build server prints compile errors but exits 0,
+# so a server-backed check reports green on a build that failed.
+run = """
+set -e
+scala-cli compile . --scalac-option -Werror --server=false
+scala-cli test . --scalac-option -Werror --server=false
+test -z "$(find src/main -name '*.test.scala' -print -quit)" || { echo "test sources belong under src/test"; exit 1; }
+test -z "$(find src/test -name '*.scala' ! -name '*.test.scala' -print -quit)" || { echo "production sources belong under src/main"; exit 1; }
+"""
