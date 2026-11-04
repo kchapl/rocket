@@ -7,7 +7,7 @@ description: Read and write the local `rocket` career record through its CLI —
 
 A local CLI over one SQLite record. Commands are not modes: nothing is "current" between runs, so each command stands alone and means the same thing on the hundredth run.
 
-Read commands print plain text — there is no `--json` — so take ids off the output lines and pass those ids back in as arguments.
+Read commands print plain text, and each also takes `--json` for one compact line when the answer needs slicing rather than reading: `career list` and `inbox list` an array, `backlog` an array of Outcomes, `quarter` a string, `quarter list` an array of names, `quarter review` `{quarter, unalignedGoals, emptyObjectives, parentlessOutcomes}`, `trace` `{goal, objective, outcome}`. Creates and state changes always answer in text: take the id off the line and pass it back in.
 
 ## Invoke
 
@@ -42,7 +42,7 @@ The record is `~/.local/share/rocket/rocket.db` (`$XDG_DATA_HOME/rocket/` when s
 Notice: 2026-Q1–Q3 closed. Carried forward 4 open outcomes into 2026-Q4.
 ```
 
-When a command answers with a bare id, take the last line.
+When a command answers with a bare id, take the last line. Under `--json` the notice moves to stderr, leaving stdout as one JSON value.
 
 Ids are `g#`, `obj#`, `out#`, `idea#`. Every id argument also accepts an exact id or a unique case-insensitive prefix of an id or a title, which is convenient and quietly lossy: similarly named records fail with `out1 matches out1, out4`. Use the exact id, and keep it when a create or promote returns it — the Backlog reads only the current Quarter, and no command lists an Objective that is neither empty nor part of `quarter review`, so a lost id is hard to recover.
 

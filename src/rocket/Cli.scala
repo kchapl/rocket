@@ -26,7 +26,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       "Career Goals: the long-term ambitions, archived once no longer pursued",
       List(
         "rocket career add <title> [--why <text>] [--verification <text>]...",
-        "rocket career list [--archived]",
+        "rocket career list [--archived] [--json]",
         "rocket career archive <id> | unarchive <id>",
         "rocket career rename <id> <title>"
       )
@@ -36,8 +36,8 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       "quarter",
       "the Quarter itself, and the Gaps in its plan",
       List(
-        "rocket quarter [current | list]",
-        "rocket quarter review [quarter]"
+        "rocket quarter [current | list] [--json]",
+        "rocket quarter review [quarter] [--json]"
       )
     )
 
@@ -66,7 +66,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       "Ideas: thought captured before it is committed to anything",
       List(
         "rocket inbox add <text>",
-        "rocket inbox list [--all]",
+        "rocket inbox list [--all] [--json]",
         "rocket inbox promote <id> [--to-goal | --to-obj <goal-id> | --to-out]",
         "rocket inbox discard <id>"
       )
@@ -75,14 +75,14 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     val trace = Noun(
       "trace",
       "the upward lineage of an Outcome",
-      List("rocket trace <outcome-id>")
+      List("rocket trace <outcome-id> [--json]")
     )
 
     val backlog = Noun(
       "backlog",
       "the Quarter's ranked queue of open Outcomes",
       List(
-        "rocket backlog [list] [--all]",
+        "rocket backlog [list] [--all] [--json]",
         "rocket backlog reorder <id> <+N | -N>"
       )
     )
@@ -118,7 +118,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
           2
       }
     case _ :: _ =>
-      rollover()
+      rollover(json = args.contains("--json"))
       dispatch(args)
   }
 
@@ -126,9 +126,10 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
    * Runs before any command, in either mode: the record moves Quarter at a
    * boundary, never part-way through a piece of work.
    */
-  private def rollover(): Unit =
+  private def rollover(json: Boolean): Unit =
     withStore { store =>
-      store.rollover(Quarter.current).foreach(out.println)
+      val stream = if (json) err else out
+      store.rollover(Quarter.current).foreach(stream.println)
     }
 
   private def dispatch(args: List[String]): Int = args match {
@@ -185,8 +186,10 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
         }
     }
 
-  private def careerList(args: List[String]): Int =
-    args.find(flag => flag.startsWith("--") && flag != "--archived") match {
+  private def careerList(args: List[String]): Int = {
+    val json = args.contains("--json")
+    val known = Set("--archived", "--json")
+    args.find(flag => flag.startsWith("--") && !known(flag)) match {
       case Some(unknown) =>
         err.println(s"unknown flag: $unknown")
         2
@@ -194,11 +197,13 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
         val archived = args.contains("--archived")
         withStore { store =>
           val goals = store.goals(archived)
-          if (goals.isEmpty) out.println(emptyMessage(archived))
+          if (json) out.println(Json.arr(goals.map(Json.goal)))
+          else if (goals.isEmpty) out.println(emptyMessage(archived))
           else goals.foreach(print)
           0
         }
     }
+  }
 
   private def setArchived(id: String, archived: Boolean): Int =
     withStore { store =>
@@ -243,37 +248,42 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
 
   // --- Planning Mode: Quarters and Objectives -----------------------------
 
-  private def quarter(args: List[String]): Int = args match {
-    case Nil | "current" :: Nil =>
-      withStore { _ => out.println(Quarter.current) }
-      0
-    case "list" :: Nil =>
-      withStore { store =>
-        val quarters = store.quarters
-        if (quarters.isEmpty) out.println("no Quarters in the record")
-        else quarters.foreach(out.println)
-      }
-      0
-    case "review" :: Nil         => quarterReview(Quarter.current)
-    case "review" :: name :: Nil => quarterReview(name)
-    case "review" :: _ =>
-      err.println("usage: rocket quarter review [quarter]")
-      2
-    case other :: _ =>
-      err.println(s"unknown quarter command: $other")
-      help(err, "quarter")
-      2
+  private def quarter(args: List[String]): Int = {
+    val json = args.contains("--json")
+    args.filterNot(_ == "--json") match {
+      case Nil | "current" :: Nil =>
+        withStore { _ => out.println(if (json) Json.str(Quarter.current) else Quarter.current) }
+        0
+      case "list" :: Nil =>
+        withStore { store =>
+          val quarters = store.quarters
+          if (json) out.println(Json.arr(quarters.map(Json.str)))
+          else if (quarters.isEmpty) out.println("no Quarters in the record")
+          else quarters.foreach(out.println)
+        }
+        0
+      case "review" :: Nil         => quarterReview(Quarter.current, json)
+      case "review" :: name :: Nil => quarterReview(name, json)
+      case "review" :: _ =>
+        err.println("usage: rocket quarter review [quarter]")
+        2
+      case other :: _ =>
+        err.println(s"unknown quarter command: $other")
+        help(err, "quarter")
+        2
+    }
   }
 
   /** Reports the reviewed Quarter's Gaps: Unaligned Goals, Empty Objectives, Parentless Outcomes. */
-  private def quarterReview(name: String): Int =
+  private def quarterReview(name: String, json: Boolean): Int =
     if (Quarter.index(name).isEmpty) {
       err.println(s"not a Quarter: $name")
       2
     } else
       withStore { store =>
         val gaps = store.review(name)
-        if (gaps.isEmpty) out.println(s"$name: no Gaps")
+        if (json) out.println(Json.gaps(gaps))
+        else if (gaps.isEmpty) out.println(s"$name: no Gaps")
         else {
           out.println(name)
           section("Unaligned Goals", gaps.unalignedGoals.map(goal => s"${goal.id}  ${goal.title}"))
@@ -431,8 +441,10 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
           }
     }
 
-  private def inboxList(args: List[String]): Int =
-    args.find(flag => flag.startsWith("--") && flag != "--all") match {
+  private def inboxList(args: List[String]): Int = {
+    val json = args.contains("--json")
+    val known = Set("--all", "--json")
+    args.find(flag => flag.startsWith("--") && !known(flag)) match {
       case Some(unknown) =>
         err.println(s"unknown flag: $unknown")
         2
@@ -440,11 +452,13 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
         val all = args.contains("--all")
         withStore { store =>
           val ideas = store.ideas(all)
-          if (ideas.isEmpty) out.println(if (all) "no Ideas" else "no pending Ideas")
+          if (json) out.println(Json.arr(ideas.map(Json.idea)))
+          else if (ideas.isEmpty) out.println(if (all) "no Ideas" else "no pending Ideas")
           else ideas.foreach(printIdea)
           0
         }
     }
+  }
 
   private def inboxPromote(args: List[String]): Int = args match {
     case Nil =>
@@ -490,7 +504,9 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       err.println("usage: rocket backlog reorder <id> <+N | -N>")
       2
     case _ =>
-      val unknown = args.filterNot(argument => argument == "list" || argument == "--all")
+      val json = args.contains("--json")
+      val allowed = Set("list", "--all", "--json")
+      val unknown = args.filterNot(allowed)
       if (unknown.nonEmpty) {
         err.println(s"unknown argument: ${unknown.head}")
         help(err, "backlog")
@@ -502,7 +518,8 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
         val all = args.contains("--all")
         withStore { store =>
           val outcomes = store.backlog(all)
-          if (outcomes.isEmpty) {
+          if (json) out.println(Json.arr(outcomes.map(Json.outcome)))
+          else if (outcomes.isEmpty) {
             val kind = if (all) "Outcomes" else "open Outcomes"
             out.println(s"no $kind in ${Quarter.current}")
           } else outcomes.foreach(printOutcome)
@@ -572,29 +589,32 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
   // --- Utility & Portability ----------------------------------------------
 
   /** Shows the whole chain the Outcome hangs from, indented from its Goal down to itself. */
-  private def trace(args: List[String]): Int = args match {
-    case flag :: _ if flag.startsWith("-") =>
-      err.println(s"unknown argument: $flag")
-      help(err, "trace")
-      2
-    case id :: Nil =>
-      withStore { store =>
-        store.lineage(id) match {
-          case Left(problem) =>
-            err.println(problem)
-            1
-          case Right(lineage) =>
-            printLineage(lineage)
-            0
+  private def trace(args: List[String]): Int = {
+    val json = args.contains("--json")
+    args.filterNot(_ == "--json") match {
+      case flag :: _ if flag.startsWith("-") =>
+        err.println(s"unknown argument: $flag")
+        help(err, "trace")
+        2
+      case id :: Nil =>
+        withStore { store =>
+          store.lineage(id) match {
+            case Left(problem) =>
+              err.println(problem)
+              1
+            case Right(lineage) =>
+              if (json) out.println(Json.lineage(lineage)) else printLineage(lineage)
+              0
+          }
         }
-      }
-    case Nil =>
-      help(err, "trace")
-      2
-    case _ =>
-      err.println("trace takes one Outcome id")
-      help(err, "trace")
-      2
+      case Nil =>
+        help(err, "trace")
+        2
+      case _ =>
+        err.println("trace takes one Outcome id")
+        help(err, "trace")
+        2
+    }
   }
 
   private def printLineage(lineage: Lineage): Unit = {

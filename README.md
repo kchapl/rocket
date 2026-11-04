@@ -62,11 +62,11 @@ Both modes: the hierarchy is shaped in Planning Mode and worked in Throughput Mo
 | Command | Purpose |
 |---|---|
 | `rocket career add <title> [--why <text>] [--verification <text>]...` | Create a Career Goal |
-| `rocket career list [--archived]` | List active Goals, or archived ones |
+| `rocket career list [--archived] [--json]` | List active Goals, or archived ones |
 | `rocket career archive <id>` / `unarchive <id>` | Archive a Goal, or return it to pursuit |
 | `rocket career rename <id> <title>` | Rename a Goal, keeping its id |
-| `rocket quarter [current \| list]` | Show the current Quarter, or list the Quarters in the record |
-| `rocket quarter review [quarter]` | Report the Quarter's Gaps: Unaligned Goals, Empty Objectives, Parentless Outcomes |
+| `rocket quarter [current \| list] [--json]` | Show the current Quarter, or list the Quarters in the record |
+| `rocket quarter review [quarter] [--json]` | Report the Quarter's Gaps: Unaligned Goals, Empty Objectives, Parentless Outcomes |
 | `rocket objective add <title> --goal <id> [--why <text>] [--verification <text>]...` | Commit a Quarterly Objective to the current Quarter |
 | `rocket objective drop <id>` | Drop an Objective by dropping every `open` Outcome under it |
 | `rocket objective rename <id> <title>` | Rename a Quarterly Objective, keeping its Goal and Quarter |
@@ -76,10 +76,10 @@ Both modes: the hierarchy is shaped in Planning Mode and worked in Throughput Mo
 | `rocket outcome parent <outcome-id> <objective-id>` | File an Outcome under an Objective, clearing the emergency flag |
 | `rocket outcome rename <id> <title>` | Rename an Outcome, keeping its Status, Stage and place in the queue |
 | `rocket inbox add <text>` | Capture an Idea |
-| `rocket inbox list [--all]` | List `pending` Ideas; `--all` also shows promoted and discarded ones |
+| `rocket inbox list [--all] [--json]` | List `pending` Ideas; `--all` also shows promoted and discarded ones |
 | `rocket inbox promote <id> [--to-goal \| --to-obj <goal-id> \| --to-out]` | Turn an Idea into a Goal, Objective or parentless Outcome; the Idea is kept, recording what it became |
 | `rocket inbox discard <id>` | Mark an Idea `discarded`; it stays as the record of the decision |
-| `rocket backlog [list] [--all]` | The Quarter's ranked queue of `open` Outcomes; `--all` adds achieved and dropped |
+| `rocket backlog [list] [--all] [--json]` | The Quarter's ranked queue of `open` Outcomes; `--all` adds achieved and dropped |
 | `rocket backlog reorder <id> <+N \| -N>` | Move an Outcome within the Quarter's queue; terminal Outcomes keep their slot |
 | `rocket progress start <id>` | Move an Outcome's stage from `todo` to `doing` |
 | `rocket progress box <id>` | Record a completed Time Box against the current Quarter, and start the work |
@@ -89,7 +89,9 @@ Utility:
 
 | Command | Purpose |
 |---|---|
-| `rocket trace <outcome-id>` | Show the whole upward chain: Outcome, its Objective, that Objective's Goal |
+| `rocket trace <outcome-id> [--json]` | Show the whole upward chain: Outcome, its Objective, that Objective's Goal |
+
+Any read command — `career list`, `quarter`, `quarter review`, `inbox list`, `backlog`, `trace` — also takes `--json` for one compact line carrying the records it would print. With it, the rollover notice moves to stderr, so stdout holds nothing but the JSON value.
 
 Every command first carries the record into the current Quarter if a calendar boundary has passed: open Outcomes move forward with their Time Boxes left in the Quarter they were recorded in, each parent Objective with live work is re-committed into the new Quarter, and one notice line reports it. Nothing is carried into the Quarters that were skipped.
 
