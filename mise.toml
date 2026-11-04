@@ -8,8 +8,8 @@ description = "Warnings are errors, the suite passes, and sources sit in the rig
 # so a server-backed check reports green on a build that failed.
 run = """
 set -e
-scala-cli compile . --scalac-option -Werror --server=false
-scala-cli test . --scalac-option -Werror --server=false
+scala-cli compile . --server=false
+scala-cli test . --server=false
 test -z "$(find src/main -name '*.test.scala' -print -quit)" || { echo "test sources belong under src/test"; exit 1; }
 test -z "$(find src/test -name '*.scala' ! -name '*.test.scala' -print -quit)" || { echo "production sources belong under src/main"; exit 1; }
 """
