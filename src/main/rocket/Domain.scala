@@ -211,6 +211,26 @@ final case class Gaps(
     unalignedGoals.isEmpty && emptyObjectives.isEmpty && parentlessOutcomes.isEmpty
 }
 
+/**
+ * What a write did, as facts rather than a sentence: the ids and counts the
+ * record now reflects. `Report` turns one into the line a person reads.
+ */
+enum Change {
+  case Created(id: String)
+  case Renamed(id: String)
+  case Archived(id: String, archived: Boolean)
+  case OutcomeStarted(id: String)
+  case TimeBoxesRecorded(id: String, count: Int)
+  case OutcomeAchieved(id: String)
+  case OutcomeDropped(id: String)
+  case ObjectiveDropped(id: String, count: Int)
+  case OutcomeParented(outcomeId: String, objectiveId: String)
+  case BacklogReordered(id: String, rank: Int)
+  case IdeaPromoted(ideaId: String, targetId: String)
+  case IdeaDiscarded(id: String)
+  case QuartersClosed(from: String, through: String, carried: Int, current: String)
+}
+
 /** Quarters are values, never rows: `YYYY-Qn`, derived from a calendar date. */
 object Quarter {
 

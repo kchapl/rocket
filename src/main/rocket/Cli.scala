@@ -142,7 +142,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
   private def rollover(json: Boolean): Unit =
     withStore { store =>
       val stream = if (json) err else out
-      store.rollover(Quarter.current).foreach(stream.println)
+      store.rollover(Quarter.current).foreach(change => stream.println(Report.line(change)))
     }
 
   private def dispatch(args: List[String]): Int = args match {
@@ -196,7 +196,9 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
         2
       case Right(parsed) =>
         withStore { store =>
-          out.println(store.createGoal(parsed.title, parsed.why, parsed.verification))
+          out.println(
+            Report.line(store.createGoal(parsed.title, parsed.why, parsed.verification))
+          )
           0
         }
     }
@@ -221,22 +223,13 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
   }
 
   private def setArchived(id: String, archived: Boolean): Int =
-    withStore { store =>
-      store.setArchived(id, archived) match {
-        case Left(problem) =>
-          err.println(problem)
-          1
-        case Right(resolved) =>
-          out.println(if (archived) s"archived $resolved" else s"unarchived $resolved")
-          0
-      }
-    }
+    report(_.setArchived(id, archived))
 
   /** A rename is the same at every tier: resolve what was named, then rewrite its Claim. */
   private def rename(
       id: String,
       words: List[String],
-      action: (Store, String, String) => Either[String, String]
+      action: (Store, String, String) => Either[String, Change]
   ): Int =
     words.find(_.startsWith("--")) match {
       case Some(unknown) =>
@@ -247,7 +240,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
         if (title.isEmpty) {
           err.println("a title is required")
           2
-        } else report(store => action(store, id, title).map(resolved => s"$resolved renamed"))
+        } else report(store => action(store, id, title))
     }
 
   private def emptyMessage(archived: Boolean): String =
@@ -358,8 +351,8 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
                 case Left(problem) =>
                   err.println(problem)
                   1
-                case Right(id) =>
-                  out.println(id)
+                case Right(change) =>
+                  out.println(Report.line(change))
                   0
               }
             }
@@ -413,8 +406,8 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
                 case Left(problem) =>
                   err.println(problem)
                   1
-                case Right(id) =>
-                  out.println(id)
+                case Right(change) =>
+                  out.println(Report.line(change))
                   0
               }
             }
@@ -452,7 +445,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
           2
         } else
           withStore { store =>
-            out.println(store.captureIdea(text))
+            out.println(Report.line(store.captureIdea(text)))
             0
           }
     }
@@ -576,14 +569,14 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       2
   }
 
-  private def report(action: Store => Either[String, String]): Int =
+  private def report(action: Store => Either[String, Change]): Int =
     withStore { store =>
       action(store) match {
         case Left(problem) =>
           err.println(problem)
           1
-        case Right(message) =>
-          out.println(message)
+        case Right(change) =>
+          out.println(Report.line(change))
           0
       }
     }

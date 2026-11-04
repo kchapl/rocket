@@ -11,7 +11,14 @@ final class Store(connection: Connection) {
 
   // --- Career Goals -------------------------------------------------------
 
-  def createGoal(title: String, why: Option[String], verification: List[String]): String = {
+  def createGoal(title: String, why: Option[String], verification: List[String]): Change =
+    Change.Created(commitGoal(title, why, verification))
+
+  private def commitGoal(
+      title: String,
+      why: Option[String],
+      verification: List[String]
+  ): String = {
     val id = nextId("g", "goal")
     inTransaction {
       val ps = connection.prepareStatement(
@@ -49,7 +56,7 @@ final class Store(connection: Connection) {
   def resolveGoal(needle: String): Either[String, String] =
     resolve(needle, "goal", "Career Goal")
 
-  def setArchived(needle: String, archived: Boolean): Either[String, String] =
+  def setArchived(needle: String, archived: Boolean): Either[String, Change] =
     resolveGoal(needle).map { id =>
       val ps = connection.prepareStatement("UPDATE goal SET archived = ? WHERE id = ?")
       try {
@@ -57,14 +64,14 @@ final class Store(connection: Connection) {
         ps.setString(2, id)
         ps.executeUpdate()
       } finally ps.close()
-      id
+      Change.Archived(id, archived)
     }
 
   /** Renames a Goal. The id is what everything points at, so nothing else moves. */
-  def renameGoal(needle: String, title: String): Either[String, String] =
+  def renameGoal(needle: String, title: String): Either[String, Change] =
     resolveGoal(needle).map { id =>
       setTitle("goal", id, title)
-      id
+      Change.Renamed(id)
     }
 
   private def setTitle(table: String, id: String, title: String): Unit = {
@@ -80,6 +87,14 @@ final class Store(connection: Connection) {
 
   /** Commits an Objective to the current Quarter under a Goal still being pursued. */
   def createObjective(
+      title: String,
+      goalNeedle: String,
+      why: Option[String],
+      verification: List[String]
+  ): Either[String, Change] =
+    addObjective(title, goalNeedle, why, verification).map(id => Change.Created(id))
+
+  private def addObjective(
       title: String,
       goalNeedle: String,
       why: Option[String],
@@ -118,10 +133,10 @@ final class Store(connection: Connection) {
     resolve(needle, "objective", "Quarterly Objective")
 
   /** Renames an Objective. Only the Claim moves: its Goal, Quarter and Verifications stay. */
-  def renameObjective(needle: String, title: String): Either[String, String] =
+  def renameObjective(needle: String, title: String): Either[String, Change] =
     resolveObjective(needle).map { id =>
       setTitle("objective", id, title)
-      id
+      Change.Renamed(id)
     }
 
   private def objectiveById(id: String): Option[QuarterlyObjective] =
@@ -135,7 +150,7 @@ final class Store(connection: Connection) {
    * transaction. The Objective row stays: it has no Status, so there is nothing
    * to record but the Outcomes it held.
    */
-  def dropObjective(needle: String): Either[String, String] =
+  def dropObjective(needle: String): Either[String, Change] =
     resolveObjective(needle).map { id =>
       val dropped = inTransaction {
         val ps = connection.prepareStatement(
@@ -146,8 +161,7 @@ final class Store(connection: Connection) {
           ps.executeUpdate()
         } finally ps.close()
       }
-      val noun = if (dropped == 1) "outcome" else "outcomes"
-      s"$id dropped $dropped $noun"
+      Change.ObjectiveDropped(id, dropped)
     }
 
   // --- Outcomes -----------------------------------------------------------
@@ -156,7 +170,10 @@ final class Store(connection: Connection) {
    * Stores an Outcome that `Domain` has already shaped, filed under the Objective
    * its plan names. The Objective must be committed in the plan's Quarter.
    */
-  def createOutcome(planned: Outcome.Planned): Either[String, String] = {
+  def createOutcome(planned: Outcome.Planned): Either[String, Change] =
+    addOutcome(planned).map(id => Change.Created(id))
+
+  private def addOutcome(planned: Outcome.Planned): Either[String, String] = {
     val quarter = planned.quarter
     val parent = planned.objectiveId match {
       case None => Right(None)
@@ -188,7 +205,7 @@ final class Store(connection: Connection) {
   def parentOutcome(
       outcomeNeedle: String,
       objectiveNeedle: String
-  ): Either[String, String] =
+  ): Either[String, Change] =
     for {
       outcomeId <- resolveOutcome(outcomeNeedle)
       outcome <- outcomeById(outcomeId).toRight(s"no Outcome $outcomeId")
@@ -197,7 +214,7 @@ final class Store(connection: Connection) {
       parented <- Outcome.reparented(outcome, objective)
     } yield {
       reparent(parented)
-      s"$outcomeId parented to $objectiveId"
+      Change.OutcomeParented(outcomeId, objectiveId)
     }
 
   private def reparent(outcome: Outcome): Unit = {
@@ -239,26 +256,26 @@ final class Store(connection: Connection) {
     resolve(needle, "outcome", "Outcome")
 
   /** Renames an Outcome, keeping its Status, Stage, parent and place in the queue. */
-  def renameOutcome(needle: String, title: String): Either[String, String] =
+  def renameOutcome(needle: String, title: String): Either[String, Change] =
     resolveOutcome(needle).map { id =>
       setTitle("outcome", id, title)
-      id
+      Change.Renamed(id)
     }
 
   // --- Throughput ---------------------------------------------------------
 
   /** Moves an open Outcome's Stage to `doing`; nothing else measures progress. */
-  def startOutcome(needle: String): Either[String, String] =
+  def startOutcome(needle: String): Either[String, Change] =
     openOutcome(needle).map { outcome =>
       setStage(outcome.id, Stage.Doing)
-      s"${outcome.id} ${Stage.Doing.wire}"
+      Change.OutcomeStarted(outcome.id)
     }
 
   /**
    * Records a completed Time Box against an Outcome, stamped with the Quarter
    * the box happened in, and starts the work.
    */
-  def recordBox(needle: String): Either[String, String] =
+  def recordBox(needle: String): Either[String, Change] =
     openOutcome(needle).map { outcome =>
       val now = Instant.now()
       val quarter = Quarter.of(LocalDate.ofInstant(now, ZoneOffset.UTC))
@@ -275,21 +292,21 @@ final class Store(connection: Connection) {
         setStage(outcome.id, Stage.Doing)
       }
       val boxes = boxCount(outcome.id)
-      s"${outcome.id} $boxes ${if (boxes == 1) "box" else "boxes"}"
+      Change.TimeBoxesRecorded(outcome.id, boxes)
     }
 
-  def achieveOutcome(needle: String): Either[String, String] =
-    closeOutcome(needle, Status.Achieved)
+  def achieveOutcome(needle: String): Either[String, Change] =
+    closeOutcome(needle, Status.Achieved, id => Change.OutcomeAchieved(id))
 
-  def dropOutcome(needle: String): Either[String, String] =
-    closeOutcome(needle, Status.Dropped)
+  def dropOutcome(needle: String): Either[String, Change] =
+    closeOutcome(needle, Status.Dropped, id => Change.OutcomeDropped(id))
 
   /**
    * Moves an open Outcome by `delta` places within the Quarter's queue and
    * renumbers the queue 1..n in one transaction. Terminal Outcomes keep the
    * slot their rank gives them.
    */
-  def reorderOutcome(needle: String, delta: Int): Either[String, String] =
+  def reorderOutcome(needle: String, delta: Int): Either[String, Change] =
     resolveOutcome(needle).flatMap { id =>
       outcomeById(id) match {
         case None =>
@@ -306,7 +323,8 @@ final class Store(connection: Connection) {
           val reordered =
             if (from == to) openIds
             else openIds.patch(from, Nil, 1).patch(to, List(id), 0)
-          Right(s"$id ${writeRanks(queue, reordered).indexOf(id) + 1}")
+          val rank = writeRanks(queue, reordered).indexOf(id) + 1
+          Right(Change.BacklogReordered(id, rank))
       }
     }
 
@@ -324,7 +342,7 @@ final class Store(connection: Connection) {
   // --- Ideas --------------------------------------------------------------
 
   /** Captures a raw thought. It has no Quarter and no parent; it commits nothing. */
-  def captureIdea(text: String): String = {
+  def captureIdea(text: String): Change = {
     val id = nextId("idea", "idea")
     val ps = connection.prepareStatement(
       "INSERT INTO idea(id, text, disposition, promoted_to, captured_at) VALUES (?, ?, 'pending', NULL, ?)"
@@ -335,7 +353,7 @@ final class Store(connection: Connection) {
       ps.setString(3, Instant.now().toString)
       ps.executeUpdate()
     } finally ps.close()
-    id
+    Change.Created(id)
   }
 
   def resolveIdea(needle: String): Either[String, String] =
@@ -352,14 +370,14 @@ final class Store(connection: Connection) {
   }
 
   /** Marks an Idea discarded. It stays as the record of the decision, not as garbage. */
-  def discardIdea(needle: String): Either[String, String] =
+  def discardIdea(needle: String): Either[String, Change] =
     pendingIdea(needle).map { idea =>
       val ps = connection.prepareStatement("UPDATE idea SET disposition = 'discarded' WHERE id = ?")
       try {
         ps.setString(1, idea.id)
         ps.executeUpdate()
       } finally ps.close()
-      s"${idea.id} discarded"
+      Change.IdeaDiscarded(idea.id)
     }
 
   /**
@@ -367,24 +385,24 @@ final class Store(connection: Connection) {
    * Idea outlives the verdict, recording the id of what it became, and the two
    * writes share one transaction.
    */
-  def promoteIdea(needle: String, promotion: Promotion): Either[String, String] =
+  def promoteIdea(needle: String, promotion: Promotion): Either[String, Change] =
     pendingIdea(needle).flatMap { idea =>
       inTransaction {
         promotion match {
           case Promotion.ToGoal =>
-            val id = createGoal(idea.text, None, Nil)
+            val id = commitGoal(idea.text, None, Nil)
             markPromoted(idea.id, id)
-            Right(id)
+            Right(Change.IdeaPromoted(idea.id, id))
           case Promotion.ToObjective(goalNeedle) =>
-            createObjective(idea.text, goalNeedle, None, Nil).map { id =>
+            addObjective(idea.text, goalNeedle, None, Nil).map { id =>
               markPromoted(idea.id, id)
-              id
+              Change.IdeaPromoted(idea.id, id)
             }
           case Promotion.ToOutcome =>
             val planned = Outcome.planned(idea.text, Quarter.current, None, false, None, Nil)
-            createOutcome(planned).map { id =>
+            addOutcome(planned).map { id =>
               markPromoted(idea.id, id)
-              id
+              Change.IdeaPromoted(idea.id, id)
             }
         }
       }
@@ -500,7 +518,7 @@ final class Store(connection: Connection) {
    * Carries the record into `current` when a boundary has passed, once however
    * many were crossed, and returns the notice to print when it moved.
    */
-  def rollover(current: String): Option[String] =
+  def rollover(current: String): Option[Change] =
     (setting("carried_through").flatMap(Quarter.index), Quarter.index(current)) match {
       case (Some(carriedThrough), Some(now)) if carriedThrough < now =>
         val carried = inTransaction {
@@ -508,7 +526,14 @@ final class Store(connection: Connection) {
           setSetting("carried_through", current)
           count
         }
-        Some(notice(carriedThrough, now, current, carried))
+        Some(
+          Change.QuartersClosed(
+            Quarter.at(carriedThrough),
+            Quarter.at(now - 1),
+            carried,
+            current
+          )
+        )
       case _ => None
     }
 
@@ -574,14 +599,6 @@ final class Store(connection: Connection) {
       copy.executeUpdate()
     } finally copy.close()
     id
-  }
-
-  private def notice(start: Int, end: Int, current: String, carried: Int): String = {
-    val closed =
-      if (end - start == 1) Quarter.at(start)
-      else s"${Quarter.at(start)}–${Quarter.at(end - 1)}"
-    val noun = if (carried == 1) "open outcome" else "open outcomes"
-    s"Notice: $closed closed. Carried forward $carried $noun into $current."
   }
 
   // --- The whole record ---------------------------------------------------
@@ -858,7 +875,11 @@ final class Store(connection: Connection) {
       }
     }
 
-  private def closeOutcome(needle: String, status: Status): Either[String, String] =
+  private def closeOutcome(
+      needle: String,
+      status: Status,
+      change: String => Change
+  ): Either[String, Change] =
     openOutcome(needle).map { outcome =>
       val ps = connection.prepareStatement("UPDATE outcome SET status = ? WHERE id = ?")
       try {
@@ -866,7 +887,7 @@ final class Store(connection: Connection) {
         ps.setString(2, outcome.id)
         ps.executeUpdate()
       } finally ps.close()
-      s"${outcome.id} ${status.wire}"
+      change(outcome.id)
     }
 
   private def setStage(id: String, stage: Stage): Unit = {
