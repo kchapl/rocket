@@ -91,10 +91,12 @@ object Outcome {
         Option.when(discarded(Field.Verification))("no Verification")
       ).flatten
       parts match {
-        case Nil          => None
+        case Nil => None
         case one :: Nil => Some(s"an emergency Outcome carries $one")
-        case init :+ last =>
-          Some(s"an emergency Outcome carries ${init.mkString(", ")} and $last")
+        case several =>
+          Some(
+            s"an emergency Outcome carries ${several.init.mkString(", ")} and ${several.last}"
+          )
       }
     }
 
