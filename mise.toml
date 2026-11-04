@@ -1,6 +1,6 @@
 [tools]
-java = "27.0.1+0"
-scala-cli = "1.18.0"
+java = "lts"
+scala-cli = "latest"
 
 [tasks.check]
 description = "Warnings are errors, the suite passes, and sources sit in the right half of src"
