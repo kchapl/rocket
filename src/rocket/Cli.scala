@@ -1,7 +1,8 @@
 package rocket
 
-import java.io.PrintStream
-import java.nio.file.Path
+import java.io.{IOException, PrintStream}
+import java.nio.file.{Files, Path, Paths}
+import java.sql.SQLException
 import scala.annotation.tailrec
 
 /** The command surface. Returns the process exit code: 0 ok, 1 domain error, 2 usage error. */
@@ -78,6 +79,18 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       List("rocket trace <outcome-id> [--json]")
     )
 
+    val exportNoun = Noun(
+      "export",
+      "the whole record as one JSON document",
+      List("rocket export [--output <file.json>]")
+    )
+
+    val importNoun = Noun(
+      "import",
+      "replace the record with a JSON document",
+      List("rocket import <file.json> [--force]")
+    )
+
     val backlog = Noun(
       "backlog",
       "the Quarter's ranked queue of open Outcomes",
@@ -95,7 +108,7 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
 
     val groups: List[Group] = List(
       Group(Some("Planning Mode"), List(career, quarter, objective, outcome, inbox)),
-      Group(None, List(trace)),
+      Group(None, List(trace, exportNoun, importNoun)),
       Group(Some("Throughput Mode"), List(backlog, progress))
     )
 
@@ -141,6 +154,8 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
     case "trace" :: rest        => trace(rest)
     case "backlog" :: rest      => backlog(rest)
     case "progress" :: rest     => progress(rest)
+    case "export" :: rest       => exportRecord(rest)
+    case "import" :: rest       => importRecord(rest)
     case other :: _             =>
       err.println(s"unknown command: $other")
       usage(err)
@@ -587,6 +602,71 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
   }
 
   // --- Utility & Portability ----------------------------------------------
+
+  /** Writes the whole record as one JSON document, to stdout or to a file. */
+  private def exportRecord(args: List[String]): Int = args match {
+    case Nil =>
+      withStore { store => out.println(Archive.encode(store.document)) }
+      0
+    case "--output" :: file :: Nil =>
+      withStore { store =>
+        val json = Archive.encode(store.document)
+        try {
+          Files.writeString(Paths.get(file), json + "\n")
+          out.println(s"exported to $file")
+          0
+        } catch {
+          case error: IOException =>
+            err.println(s"cannot write $file: ${error.getMessage}")
+            1
+        }
+      }
+    case "--output" :: Nil =>
+      err.println("--output needs a file")
+      2
+    case _ =>
+      err.println("usage: rocket export [--output <file.json>]")
+      2
+  }
+
+  /** Replaces the record with a document, refusing a store that holds data unless forced. */
+  private def importRecord(args: List[String]): Int = {
+    val force = args.contains("--force")
+    args.filterNot(_ == "--force") match {
+      case file :: Nil =>
+        readDocument(Paths.get(file)) match {
+          case Left(problem) =>
+            err.println(problem)
+            1
+          case Right(document) =>
+            withStore { store =>
+              val held = store.recordCount
+              if (held > 0 && !force) {
+                val noun = if (held == 1) "record" else "records"
+                err.println(s"the record already holds $held $noun; --force replaces it")
+                1
+              } else
+                try {
+                  store.replaceAll(document)
+                  val noun = if (document.size == 1) "record" else "records"
+                  out.println(s"imported ${document.size} $noun from $file")
+                  0
+                } catch {
+                  case error: SQLException =>
+                    err.println(s"import failed: ${error.getMessage}")
+                    1
+                }
+            }
+        }
+      case _ =>
+        err.println("usage: rocket import <file.json> [--force]")
+        2
+    }
+  }
+
+  private def readDocument(path: Path): Either[String, Document] =
+    try Archive.decode(Files.readString(path))
+    catch { case error: IOException => Left(s"cannot read $path: ${error.getMessage}") }
 
   /** Shows the whole chain the Outcome hangs from, indented from its Goal down to itself. */
   private def trace(args: List[String]): Int = {

@@ -615,6 +615,156 @@ final class Store(connection: Connection) {
     s"Notice: $closed closed. Carried forward $carried $noun into $current."
   }
 
+  // --- The whole record ---------------------------------------------------
+
+  /** Every row of every kind, plus the Quarter the store is current through. */
+  def document: Document = {
+    val goals = query(
+      "SELECT id, title, why, archived FROM goal ORDER BY CAST(SUBSTR(id, 2) AS INTEGER)",
+      _ => ()
+    )(readGoal).map(withGoalVerification)
+    val objectives = query(
+      "SELECT id, title, goal_id, quarter, why FROM objective ORDER BY CAST(SUBSTR(id, 4) AS INTEGER)",
+      _ => ()
+    )(readObjective).map(withObjectiveVerification)
+    val outcomes = query(
+      s"SELECT $OutcomeColumns FROM outcome ORDER BY quarter, rank",
+      _ => ()
+    )(readOutcome).map(withVerification)
+    val timeBoxes = query(
+      "SELECT outcome_id, quarter, recorded_at FROM time_box ORDER BY id",
+      _ => ()
+    )(rs => TimeBox(rs.getString("outcome_id"), rs.getString("quarter"), rs.getString("recorded_at")))
+    val ideas = query(
+      "SELECT id, text, disposition, promoted_to, captured_at FROM idea ORDER BY CAST(SUBSTR(id, 5) AS INTEGER)",
+      _ => ()
+    )(readIdea)
+    Document(
+      setting("carried_through").getOrElse(Quarter.current),
+      goals,
+      objectives,
+      outcomes,
+      timeBoxes,
+      ideas
+    )
+  }
+
+  def recordCount: Int =
+    List("goal", "objective", "outcome", "time_box", "idea")
+      .map(table =>
+        query(s"SELECT COUNT(*) FROM $table", _ => ())(_.getInt(1)).headOption.getOrElse(0)
+      )
+      .sum
+
+  /**
+   * Replaces the whole record with `document` in one transaction, keeping its
+   * ids verbatim. This is the only path that deletes anything, and a document
+   * that cannot be written whole leaves the store as it was.
+   */
+  def replaceAll(document: Document): Unit =
+    inTransaction {
+      List(
+        "time_box",
+        "outcome_verification",
+        "goal_verification",
+        "objective_verification",
+        "outcome",
+        "objective",
+        "idea",
+        "goal"
+      ).foreach { table =>
+        val ps = connection.prepareStatement(s"DELETE FROM $table")
+        try ps.executeUpdate()
+        finally ps.close()
+      }
+      document.goals.foreach(insertGoal)
+      document.objectives.foreach(insertObjective)
+      document.outcomes.foreach(insertOutcome)
+      document.timeBoxes.foreach(insertTimeBox)
+      document.ideas.foreach(insertIdea)
+      setSetting("carried_through", document.carriedThrough)
+    }
+
+  private def insertGoal(goal: CareerGoal): Unit = {
+    val ps = connection.prepareStatement(
+      "INSERT INTO goal(id, title, why, archived) VALUES (?, ?, ?, ?)"
+    )
+    try {
+      ps.setString(1, goal.id)
+      ps.setString(2, goal.title)
+      setOptional(ps, 3, goal.why)
+      ps.setInt(4, if (goal.archived) 1 else 0)
+      ps.executeUpdate()
+    } finally ps.close()
+    insertVerification("goal_verification", "goal_id", goal.id, goal.verification)
+  }
+
+  private def insertObjective(objective: QuarterlyObjective): Unit = {
+    val ps = connection.prepareStatement(
+      "INSERT INTO objective(id, title, goal_id, quarter, why) VALUES (?, ?, ?, ?, ?)"
+    )
+    try {
+      ps.setString(1, objective.id)
+      ps.setString(2, objective.title)
+      ps.setString(3, objective.goalId)
+      ps.setString(4, objective.quarter)
+      setOptional(ps, 5, objective.why)
+      ps.executeUpdate()
+    } finally ps.close()
+    insertVerification(
+      "objective_verification",
+      "objective_id",
+      objective.id,
+      objective.verification
+    )
+  }
+
+  private def insertOutcome(outcome: Outcome): Unit = {
+    val ps = connection.prepareStatement(
+      """INSERT INTO outcome(id, title, quarter, objective_id, emergency, why, rank, status, stage)
+         |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin
+    )
+    try {
+      ps.setString(1, outcome.id)
+      ps.setString(2, outcome.title)
+      ps.setString(3, outcome.quarter)
+      setOptional(ps, 4, outcome.objectiveId)
+      ps.setInt(5, if (outcome.emergency) 1 else 0)
+      setOptional(ps, 6, outcome.why)
+      ps.setInt(7, outcome.rank)
+      ps.setString(8, outcome.status.wire)
+      ps.setString(9, outcome.stage.wire)
+      ps.executeUpdate()
+    } finally ps.close()
+    insertVerification("outcome_verification", "outcome_id", outcome.id, outcome.verification)
+  }
+
+  private def insertTimeBox(box: TimeBox): Unit = {
+    val ps = connection.prepareStatement(
+      "INSERT INTO time_box(outcome_id, quarter, recorded_at) VALUES (?, ?, ?)"
+    )
+    try {
+      ps.setString(1, box.outcomeId)
+      ps.setString(2, box.quarter)
+      ps.setString(3, box.recordedAt)
+      ps.executeUpdate()
+    } finally ps.close()
+  }
+
+  private def insertIdea(idea: Idea): Unit = {
+    val ps = connection.prepareStatement(
+      "INSERT INTO idea(id, text, disposition, promoted_to, captured_at) VALUES (?, ?, ?, ?, ?)"
+    )
+    try {
+      ps.setString(1, idea.id)
+      ps.setString(2, idea.text)
+      ps.setString(3, idea.disposition.wire)
+      setOptional(ps, 4, idea.promotedTo)
+      ps.setString(5, idea.capturedAt)
+      ps.executeUpdate()
+    } finally ps.close()
+  }
+
   // --- Shared helpers -----------------------------------------------------
 
   private def resolve(

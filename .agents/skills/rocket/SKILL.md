@@ -81,6 +81,8 @@ Ids are `g#`, `obj#`, `out#`, `idea#`. Every id argument also accepts an exact i
 | `progress achieve <id>` / `progress drop <id>` | `out1 achieved` / `out1 dropped`                                      |
 | `trace <outcome-id>`                        | Goal, Objective indented two, Outcome indented four, with `  (parentless)` when it has no Objective |
 
+`export [--output <file.json>]` writes the whole record as one JSON document (`format: rocket`, ids, Time Boxes and `carriedThrough` included), and `import <file.json> [--force]` replaces the record with one, ids preserved; a store that already holds data refuses without `--force`.
+
 There is no `objective list` and no Outcome list beyond the Backlog. `trace` is the read for one Outcome's whole lineage.
 
 ## The rules the record follows

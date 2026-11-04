@@ -89,6 +89,8 @@ Utility:
 
 | Command | Purpose |
 |---|---|
+| `rocket export [--output <file.json>]` | Write the whole record as one JSON document, to stdout or to a file |
+| `rocket import <file.json> [--force]` | Replace the record with a document, ids preserved; refuses a store holding data unless `--force` |
 | `rocket trace <outcome-id> [--json]` | Show the whole upward chain: Outcome, its Objective, that Objective's Goal |
 
 Any read command — `career list`, `quarter`, `quarter review`, `inbox list`, `backlog`, `trace` — also takes `--json` for one compact line carrying the records it would print. With it, the rollover notice moves to stderr, so stdout holds nothing but the JSON value.
@@ -101,6 +103,6 @@ Notice: 2026-Q1–Q3 closed. Carried forward 4 open outcomes into 2026-Q4.
 
 Repeatable `--verification` flags keep the order given. Ids accept an exact id or a unique case-insensitive prefix of the id or title. Exit codes: `0` success, `1` domain error (unknown or ambiguous id, archived Goal, cross-Quarter parent, already-closed Outcome), `2` usage error.
 
-Not yet implemented: `export` and `import`.
+`export` and `import` carry the whole record between stores as one JSON document in rocket's own format (`format: rocket`, `schemaVersion: 1`); reading `trajectory` documents is not built yet.
 
 Tests: `scala-cli test .`

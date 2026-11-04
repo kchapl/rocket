@@ -54,7 +54,7 @@ The tier definitions and the words for them are owned by [CONTEXT.md](CONTEXT.md
 - **Tooling**: `scala-cli` (installed via `mise`)
 - **Compilation Target**: GraalVM Native Image / Scala Native for sub-50ms CLI startup.
 - **Persistence**: SQLite stored at `~/.local/share/rocket/rocket.db`.
-- **Interchange & Portability**: 100% JSON compatibility with `kchapl/trajectory` (`schemaVersion: 1`).
+- **Interchange & Portability**: one rocket JSON document (`format: rocket`, `schemaVersion: 1`) for `export` and `import`. Compatibility with `kchapl/trajectory` is retrofitted at that boundary later, never in the store.
 - **Formatting**: ANSI-colored terminal hierarchy views by default; global `--json` flag on read commands for Unix pipelines.
 
 ---
@@ -105,8 +105,8 @@ Repeatable `--verification` flags keep the order they are given, so the first fl
 
 | Command | Purpose |
 |---|---|
-| `rocket export [--output <file.json>]` | Export complete state to `trajectory`-compatible JSON |
-| `rocket import <file.json> [--force]` | Replace the store with a `trajectory` document, ids preserved verbatim; refuses when the store holds data unless `--force` |
+| `rocket export [--output <file.json>]` | Write the whole record as one `rocket` JSON document; `trajectory` compatibility is retrofitted at this boundary later |
+| `rocket import <file.json> [--force]` | Replace the store with a `rocket` document, ids preserved verbatim; refuses when the store holds data unless `--force` |
 | `rocket trace <outcome-id>` | Show full upward lineage: Outcome $\rightarrow$ Objective $\rightarrow$ Career Goal |
 
 ---

@@ -90,6 +90,24 @@ final case class Lineage(
     goal: Option[CareerGoal]
 )
 
+/** A completed Time Box as stored: effort already spent, stamped with its Quarter. */
+final case class TimeBox(outcomeId: String, quarter: String, recordedAt: String)
+
+/**
+ * The whole record as one portable value: every row of every kind, plus the
+ * Quarter the store is known to be current through.
+ */
+final case class Document(
+    carriedThrough: String,
+    goals: List[CareerGoal],
+    objectives: List[QuarterlyObjective],
+    outcomes: List[Outcome],
+    timeBoxes: List[TimeBox],
+    ideas: List[Idea]
+) {
+  def size: Int = goals.size + objectives.size + outcomes.size + timeBoxes.size + ideas.size
+}
+
 /** The Gaps a reviewed Quarter surfaces: holes in the plan, never stored. */
 final case class Gaps(
     quarter: String,
