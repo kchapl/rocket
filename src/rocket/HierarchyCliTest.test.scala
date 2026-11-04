@@ -172,12 +172,12 @@ class HierarchyCliTest extends CliHarness {
     val (whyCode, _, whyErr) =
       run(db, "outcome", "add", "--emergency", "fix production", "--why", "it is down")
     assertEquals(whyCode, 2)
-    assert(whyErr.contains("carries no --why"), whyErr)
+    assert(whyErr.contains("carries no Why"), whyErr)
 
     val (objectiveCode, _, objectiveErr) =
       run(db, "outcome", "add", "--emergency", "--objective", "obj1", "fix production")
     assertEquals(objectiveCode, 2)
-    assert(objectiveErr.contains("no --objective"), objectiveErr)
+    assert(objectiveErr.contains("carries no Objective"), objectiveErr)
 
     assertEquals(rows(db, "SELECT id FROM outcome"), Nil)
   }

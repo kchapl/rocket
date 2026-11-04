@@ -153,19 +153,12 @@ final class Store(connection: Connection) {
   // --- Outcomes -----------------------------------------------------------
 
   /**
-   * Plans an Outcome in the current Quarter. Without an Objective it is
-   * parentless — flagged as an emergency or unfiled — and an emergency Outcome
-   * keeps neither a Why nor Verification statements.
+   * Stores an Outcome that `Domain` has already shaped, filed under the Objective
+   * its plan names. The Objective must be committed in the plan's Quarter.
    */
-  def createOutcome(
-      title: String,
-      objectiveNeedle: Option[String],
-      emergency: Boolean,
-      why: Option[String],
-      verification: List[String]
-  ): Either[String, String] = {
-    val quarter = Quarter.current
-    val parent = objectiveNeedle match {
+  def createOutcome(planned: Outcome.Planned): Either[String, String] = {
+    val quarter = planned.quarter
+    val parent = planned.objectiveId match {
       case None => Right(None)
       case Some(needle) =>
         resolveObjective(needle).flatMap { id =>
@@ -181,29 +174,7 @@ final class Store(connection: Connection) {
     parent.map { objectiveId =>
       inTransaction {
         val id = nextId("out", "outcome")
-        val ps = connection.prepareStatement(
-          """INSERT INTO outcome(id, title, quarter, objective_id, emergency, why, rank)
-            |VALUES (?, ?, ?, ?, ?, ?, ?)""".stripMargin
-        )
-        try {
-          ps.setString(1, id)
-          ps.setString(2, title)
-          ps.setString(3, quarter)
-          objectiveId match {
-            case Some(parentId) => ps.setString(4, parentId)
-            case None           => ps.setNull(4, Types.VARCHAR)
-          }
-          ps.setInt(5, if (emergency) 1 else 0)
-          setOptional(ps, 6, if (emergency) None else why)
-          ps.setInt(7, nextRank(quarter))
-          ps.executeUpdate()
-        } finally ps.close()
-        insertVerification(
-          "outcome_verification",
-          "outcome_id",
-          id,
-          if (emergency) Nil else verification
-        )
+        insertOutcome(planned.stored(id, nextRank(quarter)).copy(objectiveId = objectiveId))
         id
       }
     }
@@ -222,23 +193,20 @@ final class Store(connection: Connection) {
       outcomeId <- resolveOutcome(outcomeNeedle)
       outcome <- outcomeById(outcomeId).toRight(s"no Outcome $outcomeId")
       objectiveId <- resolveObjective(objectiveNeedle)
-      committed <- objectiveQuarter(objectiveId).toRight(s"no Quarterly Objective $objectiveId")
-      _ <-
-        if (committed == outcome.quarter) Right(())
-        else
-          Left(s"Quarterly Objective $objectiveId is committed in $committed, not ${outcome.quarter}")
+      objective <- objectiveById(objectiveId).toRight(s"no Quarterly Objective $objectiveId")
+      parented <- Outcome.reparented(outcome, objective)
     } yield {
-      reparent(outcomeId, objectiveId)
+      reparent(parented)
       s"$outcomeId parented to $objectiveId"
     }
 
-  private def reparent(outcomeId: String, objectiveId: String): Unit = {
+  private def reparent(outcome: Outcome): Unit = {
     val ps = connection.prepareStatement(
       "UPDATE outcome SET objective_id = ?, emergency = 0 WHERE id = ?"
     )
     try {
-      ps.setString(1, objectiveId)
-      ps.setString(2, outcomeId)
+      setOptional(ps, 1, outcome.objectiveId)
+      ps.setString(2, outcome.id)
       ps.executeUpdate()
     } finally ps.close()
   }
@@ -413,7 +381,8 @@ final class Store(connection: Connection) {
               id
             }
           case Promotion.ToOutcome =>
-            createOutcome(idea.text, None, false, None, Nil).map { id =>
+            val planned = Outcome.planned(idea.text, Quarter.current, None, false, None, Nil)
+            createOutcome(planned).map { id =>
               markPromoted(idea.id, id)
               id
             }

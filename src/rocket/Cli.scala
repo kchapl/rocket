@@ -394,29 +394,30 @@ final class Cli(dbPath: Path, out: PrintStream, err: PrintStream) {
       case Left(problem) =>
         err.println(problem)
         2
-      case Right(parsed) if parsed.emergency && parsed.objective.nonEmpty =>
-        err.println("an emergency Outcome has no --objective")
-        2
-      case Right(parsed)
-          if parsed.emergency && (parsed.why.nonEmpty || parsed.verification.nonEmpty) =>
-        err.println("an emergency Outcome carries no --why and no --verification")
-        2
       case Right(parsed) =>
-        withStore { store =>
-          store.createOutcome(
-            parsed.title,
-            parsed.objective,
-            parsed.emergency,
-            parsed.why,
-            parsed.verification
-          ) match {
-            case Left(problem) =>
-              err.println(problem)
-              1
-            case Right(id) =>
-              out.println(id)
-              0
-          }
+        val planned = Outcome.planned(
+          parsed.title,
+          Quarter.current,
+          parsed.objective,
+          parsed.emergency,
+          parsed.why,
+          parsed.verification
+        )
+        planned.refusal match {
+          case Some(problem) =>
+            err.println(problem)
+            2
+          case None =>
+            withStore { store =>
+              store.createOutcome(planned) match {
+                case Left(problem) =>
+                  err.println(problem)
+                  1
+                case Right(id) =>
+                  out.println(id)
+                  0
+              }
+            }
         }
     }
 

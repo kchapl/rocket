@@ -139,6 +139,26 @@ class PortabilityCliTest extends CliHarness {
     assertEquals(run(db, "backlog")._2.trim, s"no open Outcomes in ${Quarter.current}")
   }
 
+  test("import refuses an emergency Outcome that states Verification") {
+    val db = tempDb()
+    val file = runtimeFile("emergency-verification.json")
+    Files.writeString(
+      file,
+      s"""{"format":"rocket","schemaVersion":1,"carriedThrough":"${Quarter.current}",
+         |"goals":[],"objectives":[],"timeBoxes":[],"ideas":[],
+         |"outcomes":[{"id":"out1","title":"prod is down","quarter":"${Quarter.current}",
+         |"objectiveId":null,"emergency":true,"why":null,"verification":["the pager stops"],
+         |"rank":1,"status":"open","stage":"todo"}]}""".stripMargin
+    )
+
+    val (code, out, err) = run(db, "import", file.toString)
+
+    assertEquals(code, 1)
+    assertEquals(out, "")
+    assert(err.contains("carries no Verification"), err)
+    assertEquals(rows(db, "SELECT id FROM outcome"), Nil)
+  }
+
   test("import says why a file is not a rocket document") {
     val db = tempDb()
 

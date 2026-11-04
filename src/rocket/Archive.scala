@@ -88,21 +88,18 @@ object Archive {
       _ <- quarterField(quarter, where)
       objectiveId <- optionalStringField(fields, "objectiveId", where)
       emergency <- boolField(fields, "emergency", where)
-      _ <-
-        if (emergency && objectiveId.nonEmpty)
-          Left(s"$where: an emergency Outcome has no objectiveId")
-        else Right(())
       why <- optionalStringField(fields, "why", where)
-      _ <-
-        if (emergency && why.nonEmpty) Left(s"$where: an emergency Outcome carries no why")
-        else Right(())
       verification <- stringsField(fields, "verification", where)
       rank <- intField(fields, "rank", where)
       statusName <- stringField(fields, "status", where)
       status <- Status.parse(statusName).toRight(s"$where: unknown status \"$statusName\"")
       stageName <- stringField(fields, "stage", where)
       stage <- Stage.parse(stageName).toRight(s"$where: unknown stage \"$stageName\"")
-    } yield Outcome(id, title, quarter, objectiveId, emergency, why, verification, rank, status, stage)
+      planned = Outcome.planned(title, quarter, objectiveId, emergency, why, verification)
+      _ <- planned.refusal.fold[Either[String, Unit]](Right(()))(problem =>
+        Left(s"$where: $problem")
+      )
+    } yield planned.stored(id, rank).copy(status = status, stage = stage)
 
   private def decodeTimeBox(value: Json.JsonValue, where: String): Either[String, TimeBox] =
     for {

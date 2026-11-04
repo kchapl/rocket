@@ -56,6 +56,96 @@ final case class Outcome(
     stage: Stage
 )
 
+object Outcome {
+
+  /** A field an Emergency Outcome's shape forbids; planning reports each one it dropped. */
+  enum Field {
+    case Objective
+    case Why
+    case Verification
+  }
+
+  /**
+   * What an Outcome would be with this shape, before it has an id or a place in
+   * the queue. An emergency keeps no Objective, Why or Verification; `discarded`
+   * names what the caller asked for anyway, so a door can refuse rather than
+   * silently drop what someone wrote. `objectiveId` is whatever the door holds —
+   * a needle from the command line, an id in a document — and only the store
+   * resolves it.
+   */
+  final case class Planned(
+      title: String,
+      quarter: String,
+      objectiveId: Option[String],
+      emergency: Boolean,
+      why: Option[String],
+      verification: List[String],
+      discarded: Set[Field]
+  ) {
+
+    /** The one sentence for the shape this plan had to bend; `None` when it bent nothing. */
+    def refusal: Option[String] = {
+      val parts = List(
+        Option.when(discarded(Field.Objective))("no Objective"),
+        Option.when(discarded(Field.Why))("no Why"),
+        Option.when(discarded(Field.Verification))("no Verification")
+      ).flatten
+      parts match {
+        case Nil          => None
+        case one :: Nil => Some(s"an emergency Outcome carries $one")
+        case init :+ last =>
+          Some(s"an emergency Outcome carries ${init.mkString(", ")} and $last")
+      }
+    }
+
+    def stored(id: String, rank: Int): Outcome =
+      Outcome(
+        id,
+        title,
+        quarter,
+        objectiveId,
+        emergency,
+        why,
+        verification,
+        rank,
+        Status.Open,
+        Stage.Todo
+      )
+  }
+
+  def planned(
+      title: String,
+      quarter: String,
+      objectiveId: Option[String],
+      emergency: Boolean,
+      why: Option[String],
+      verification: List[String]
+  ): Planned =
+    if (!emergency)
+      Planned(title, quarter, objectiveId, emergency = false, why, verification, Set.empty)
+    else {
+      val discarded = Set(
+        Option.when(objectiveId.nonEmpty)(Field.Objective),
+        Option.when(why.nonEmpty)(Field.Why),
+        Option.when(verification.nonEmpty)(Field.Verification)
+      ).flatten
+      Planned(title, quarter, None, emergency = true, None, Nil, discarded)
+    }
+
+  /**
+   * The Outcome as it stands once filed under `objective`: no longer an emergency,
+   * and still holding whatever Why it had (an emergency's is empty). A parent in
+   * another Quarter is refused, because an Outcome and its Objective are
+   * per-Quarter commitments.
+   */
+  def reparented(outcome: Outcome, objective: QuarterlyObjective): Either[String, Outcome] =
+    if (objective.quarter != outcome.quarter)
+      Left(
+        s"Quarterly Objective ${objective.id} is committed in ${objective.quarter}, not ${outcome.quarter}"
+      )
+    else Right(outcome.copy(objectiveId = Some(objective.id), emergency = false))
+}
+
 /** What became of an Idea. `promoted` and `discarded` are final (ADR 0002). */
 enum Disposition(val wire: String) {
   case Pending extends Disposition("pending")
